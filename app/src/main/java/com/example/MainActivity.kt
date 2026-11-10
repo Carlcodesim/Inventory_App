@@ -69,7 +69,7 @@ import com.example.ui.screens.DashboardScreen
 import com.example.ui.screens.InventoryScreen
 import com.example.ui.screens.KardexScreen
 import com.example.ui.screens.SalesPosScreen
-import com.example.ui.theme.MyApplicationTheme
+import com.example.ui.theme.InventoryAppTheme
 
 enum class PosTab(val title: String, val selectedIcon: ImageVector, val unselectedIcon: ImageVector) {
     DASHBOARD("Inicio", Icons.Filled.Dashboard, Icons.Outlined.Dashboard),
@@ -88,7 +88,7 @@ class MainActivity : ComponentActivity() {
         val factory = PosViewModelFactory(repository)
 
         setContent {
-            MyApplicationTheme {
+            InventoryAppTheme {
                 MainApp(factory = factory)
             }
         }
