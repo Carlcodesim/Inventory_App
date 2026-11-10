@@ -112,14 +112,22 @@ class PosRepository(private val db: AppDatabase) {
             val product = productDao.getProductById(productId)
                 ?: return@withTransaction Result.failure(IllegalStateException("Producto no encontrado"))
 
+            val store = storeDao.getStoreById(storeId)
+                ?: return@withTransaction Result.failure(IllegalStateException("Sucursal no encontrada"))
+
+            if (product.storeId != storeId) {
+                return@withTransaction Result.failure(
+                    IllegalArgumentException("El producto no pertenece a la sucursal seleccionada")
+                )
+            }
+
             if (product.stock < quantity) {
                 return@withTransaction Result.failure(
                     IllegalStateException("Stock insuficiente: disponible ${product.stock}, solicitado $quantity")
                 )
             }
 
-            val store = storeDao.getStoreById(storeId)
-            val storeName = store?.name ?: "Sucursal #$storeId"
+            val storeName = store.name
 
             val previousStock = product.stock
             val newStock = previousStock - quantity
@@ -170,6 +178,13 @@ class PosRepository(private val db: AppDatabase) {
     ): Result<Unit> {
         if (quantityChange <= 0) {
             return Result.failure(IllegalArgumentException("La cantidad debe ser mayor a 0"))
+        }
+        if (type == MovementType.TRASPASO) {
+            return Result.failure(
+                UnsupportedOperationException(
+                    "El traspaso entre sucursales aún no está implementado como operación de salida y entrada"
+                )
+            )
         }
 
         return db.withTransaction {
