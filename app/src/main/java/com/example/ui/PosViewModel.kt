@@ -159,11 +159,8 @@ class PosViewModel(private val repository: PosRepository) : ViewModel() {
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), DashboardKpis())
 
-    init {
-        viewModelScope.launch {
-            repository.seedInitialDataIfNeeded()
-        }
-    }
+    // La aplicación inicia vacía. Los datos de ejemplo no deben insertarse
+    // automáticamente en una instalación destinada a inventario real.
 
     // --- Actions ---
 
