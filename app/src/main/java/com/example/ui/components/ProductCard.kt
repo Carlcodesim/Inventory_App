@@ -77,6 +77,7 @@ fun ProductCard(
 ) {
     val context = LocalContext.current
     var menuExpanded by remember { mutableStateOf(false) }
+    var photoLoadFailed by remember(product.photoUrl) { mutableStateOf(false) }
 
     Card(
         modifier = modifier
@@ -102,20 +103,21 @@ fun ProductCard(
                         .background(MaterialTheme.colorScheme.surfaceVariant),
                     contentAlignment = Alignment.Center
                 ) {
-                    if (product.photoUrl.isNotBlank()) {
+                    if (product.photoUrl.isNotBlank() && !photoLoadFailed) {
                         AsyncImage(
                             model = ImageRequest.Builder(context)
-                                .data(product.photoUrl)
+                                .data(product.photoUrl.trim())
                                 .crossfade(true)
                                 .build(),
                             contentDescription = product.name,
                             modifier = Modifier.size(68.dp),
-                            contentScale = ContentScale.Crop
+                            contentScale = ContentScale.Crop,
+                            onError = { photoLoadFailed = true }
                         )
                     } else {
                         Icon(
                             imageVector = Icons.Default.Category,
-                            contentDescription = null,
+                            contentDescription = if (photoLoadFailed) "No se pudo cargar la imagen" else "Sin imagen",
                             tint = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.size(32.dp)
                         )
