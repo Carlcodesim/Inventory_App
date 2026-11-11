@@ -80,6 +80,9 @@ fun ProductFormDialog(
         mutableStateOf(initialProduct?.storeId ?: selectedStoreId ?: stores.firstOrNull()?.id ?: 1L)
     }
     var storeDropdownExpanded by remember { mutableStateOf(false) }
+    var categoryDropdownExpanded by remember { mutableStateOf(false) }
+    var supplierDropdownExpanded by remember { mutableStateOf(false) }
+    var photoLoadFailed by remember { mutableStateOf(false) }
 
     var name by remember { mutableStateOf(initialProduct?.name ?: "") }
     var category by remember { mutableStateOf(initialProduct?.category ?: "") }
@@ -184,30 +187,63 @@ fun ProductFormDialog(
                     singleLine = true
                 )
 
-                // Category & Supplier in row
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
+                // Categories and suppliers are selected from the catalogs in Settings.
+                Box(modifier = Modifier.fillMaxWidth()) {
                     OutlinedTextField(
-                        value = category,
-                        onValueChange = { category = it },
+                        value = category.ifBlank { "Seleccionar categoría" },
+                        onValueChange = {},
+                        readOnly = true,
                         label = { Text("Categoría *") },
-                        modifier = Modifier
-                            .weight(1f)
-                            .testTag("product_category_input"),
-                        singleLine = true
+                        isError = category.isBlank(),
+                        trailingIcon = { Icon(Icons.Default.KeyboardArrowDown, contentDescription = null) },
+                        modifier = Modifier.fillMaxWidth().clickable { categoryDropdownExpanded = true }
+                            .testTag("product_category_input")
                     )
+                    DropdownMenu(
+                        expanded = categoryDropdownExpanded,
+                        onDismissRequest = { categoryDropdownExpanded = false }
+                    ) {
+                        existingCategories.distinct().forEach { option ->
+                            DropdownMenuItem(
+                                text = { Text(option) },
+                                onClick = { category = option; categoryDropdownExpanded = false }
+                            )
+                        }
+                        if (existingCategories.isEmpty()) {
+                            DropdownMenuItem(
+                                text = { Text("Agrega categorías desde Configuración") },
+                                enabled = false,
+                                onClick = {}
+                            )
+                        }
+                    }
+                }
 
+                Box(modifier = Modifier.fillMaxWidth()) {
                     OutlinedTextField(
-                        value = supplier,
-                        onValueChange = { supplier = it },
-                        label = { Text("Proveedor") },
-                        modifier = Modifier
-                            .weight(1f)
-                            .testTag("product_supplier_input"),
-                        singleLine = true
+                        value = supplier.ifBlank { "Sin proveedor" },
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("Proveedor (opcional)") },
+                        trailingIcon = { Icon(Icons.Default.KeyboardArrowDown, contentDescription = null) },
+                        modifier = Modifier.fillMaxWidth().clickable { supplierDropdownExpanded = true }
+                            .testTag("product_supplier_input")
                     )
+                    DropdownMenu(
+                        expanded = supplierDropdownExpanded,
+                        onDismissRequest = { supplierDropdownExpanded = false }
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("Sin proveedor") },
+                            onClick = { supplier = ""; supplierDropdownExpanded = false }
+                        )
+                        existingSuppliers.distinct().forEach { option ->
+                            DropdownMenuItem(
+                                text = { Text(option) },
+                                onClick = { supplier = option; supplierDropdownExpanded = false }
+                            )
+                        }
+                    }
                 }
 
                 // Cost and Sale Price
@@ -339,7 +375,7 @@ fun ProductFormDialog(
                 // Photo URL
                 OutlinedTextField(
                     value = photoUrl,
-                    onValueChange = { photoUrl = it },
+                    onValueChange = { photoUrl = it; photoLoadFailed = false },
                     label = { Text("URL de la Foto") },
                     leadingIcon = { Icon(Icons.Default.Image, contentDescription = null) },
                     modifier = Modifier
@@ -355,18 +391,28 @@ fun ProductFormDialog(
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         Text("Vista previa:", style = MaterialTheme.typography.bodySmall)
-                        AsyncImage(
-                            model = ImageRequest.Builder(LocalContext.current)
-                                .data(photoUrl)
-                                .crossfade(true)
-                                .build(),
-                            contentDescription = "Foto producto",
-                            modifier = Modifier
-                                .size(48.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                                .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(8.dp)),
-                            contentScale = ContentScale.Crop
-                        )
+                        if (photoLoadFailed) {
+                            Text(
+                                "No se pudo cargar. Usa un enlace HTTPS directo a la imagen (JPG, PNG o WEBP).",
+                                color = MaterialTheme.colorScheme.error,
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        } else {
+                            AsyncImage(
+                                model = ImageRequest.Builder(LocalContext.current)
+                                    .data(photoUrl.trim())
+                                    .crossfade(true)
+                                    .build(),
+                                contentDescription = "Foto producto",
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(8.dp)),
+                                contentScale = ContentScale.Crop,
+                                onError = { photoLoadFailed = true },
+                                onSuccess = { photoLoadFailed = false }
+                            )
+                        }
                     }
                 }
 
@@ -388,16 +434,18 @@ fun ProductFormDialog(
             Button(
                 onClick = {
                     val isNameValid = name.isNotBlank()
+                    val isCategoryValid = category.isNotBlank()
                     val cost = costPriceStr.toDoubleOrNull()
                     val sale = salePriceStr.toDoubleOrNull()
                     val isCostValid = cost != null && cost >= 0
                     val isPriceValid = sale != null && sale >= 0
 
                     nameError = !isNameValid
+                    
                     costError = !isCostValid
                     priceError = !isPriceValid
 
-                    if (isNameValid && isCostValid && isPriceValid) {
+                    if (isNameValid && isCategoryValid && isCostValid && isPriceValid) {
                         val stock = stockStr.toIntOrNull() ?: 0
                         val minStock = minStockStr.toIntOrNull() ?: 5
 
@@ -406,8 +454,8 @@ fun ProductFormDialog(
                                 id = initialProduct?.id ?: 0L,
                                 storeId = storeId,
                                 name = name.trim(),
-                                category = category.trim().ifBlank { "General" },
-                                supplier = supplier.trim().ifBlank { "General" },
+                                category = category.trim(),
+                                supplier = supplier.trim(),
                                 costPrice = cost!!,
                                 salePrice = sale!!,
                                 stock = stock,
