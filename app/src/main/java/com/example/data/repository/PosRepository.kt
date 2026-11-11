@@ -51,14 +51,7 @@ class PosRepository(private val db: AppDatabase) {
     }
 
     suspend fun deleteCatalogItem(name: String, type: String) {
-        // Resolve by its unique type/name pair without touching products.
-        db.withTransaction {
-            val id = db.openHelper.writableDatabase.query(
-                "SELECT id FROM catalog_items WHERE type = ? AND name = ? COLLATE NOCASE LIMIT 1",
-                arrayOf(type, name)
-            ).use { cursor -> if (cursor.moveToFirst()) cursor.getLong(0) else null }
-            if (id != null) catalogDao.deleteById(id)
-        }
+        catalogDao.deleteByName(type, name)
     }
 
     suspend fun getProductById(id: Long): Product? = productDao.getProductById(id)
