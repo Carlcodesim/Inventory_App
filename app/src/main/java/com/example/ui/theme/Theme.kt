@@ -2,7 +2,6 @@ package com.example.ui.theme
 
 import android.app.Activity
 import android.os.Build
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.dynamicDarkColorScheme
@@ -70,7 +69,7 @@ private val DarkColorScheme = darkColorScheme(
 /**
  * Tema principal para la aplicación de Inventario y Punto de Venta (Inventory_App).
  *
- * @param darkTheme Define si se activa el tema oscuro (por defecto sigue la configuración del sistema).
+ * @param darkTheme Define si se activa el tema oscuro (por defecto se usa el tema claro de alto contraste).
  * @param dynamicColor Habilita colores dinámicos Material You en dispositivos Android 12+ (API 31+).
  *                     Por defecto se mantiene false para preservar la identidad visual de la marca POS.
  * @param content Contenido composable de la pantalla.
@@ -117,7 +116,7 @@ fun InventoryAppTheme(
  */
 @Composable
 fun MyApplicationTheme(
-    darkTheme: Boolean = isSystemInDarkTheme(),
+    darkTheme: Boolean = false,
     dynamicColor: Boolean = false,
     content: @Composable () -> Unit
 ) {
