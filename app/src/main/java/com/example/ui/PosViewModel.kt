@@ -188,6 +188,14 @@ class PosViewModel(private val repository: PosRepository) : ViewModel() {
         kardexMovementFilter.value = type
     }
 
+    fun addCatalogItem(name: String, type: String) {
+        viewModelScope.launch { repository.addCatalogItem(name, type) }
+    }
+
+    fun deleteCatalogItem(name: String, type: String) {
+        viewModelScope.launch { repository.deleteCatalogItem(name, type) }
+    }
+
     fun saveStore(store: Store, onComplete: () -> Unit = {}) {
         viewModelScope.launch {
             repository.saveStore(store)
