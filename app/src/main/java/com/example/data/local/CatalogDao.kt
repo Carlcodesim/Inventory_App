@@ -18,6 +18,6 @@ interface CatalogDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insert(item: CatalogItem): Long
 
-    @Query("DELETE FROM catalog_items WHERE id = :id")
-    suspend fun deleteById(id: Long)
+    @Query("DELETE FROM catalog_items WHERE type = :type AND name = :name COLLATE NOCASE")
+    suspend fun deleteByName(type: String, name: String)
 }
