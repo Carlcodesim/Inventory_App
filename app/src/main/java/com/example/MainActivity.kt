@@ -24,6 +24,7 @@ import androidx.compose.material.icons.filled.Dashboard
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Inventory2
 import androidx.compose.material.icons.filled.PointOfSale
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Storefront
 import androidx.compose.material.icons.outlined.Dashboard
 import androidx.compose.material.icons.outlined.History
@@ -62,6 +63,7 @@ import com.example.data.model.Store
 import com.example.data.repository.PosRepository
 import com.example.ui.PosViewModel
 import com.example.ui.PosViewModelFactory
+import com.example.ui.components.CatalogManagementDialog
 import com.example.ui.components.ProductFormDialog
 import com.example.ui.components.StockAdjustmentDialog
 import com.example.ui.components.StoreManagementDialog
@@ -121,6 +123,7 @@ fun MainApp(factory: PosViewModelFactory) {
     var showProductForm by remember { mutableStateOf(false) }
     var productToEdit by remember { mutableStateOf<Product?>(null) }
     var showStoreManagement by remember { mutableStateOf(false) }
+    var showCatalogManagement by remember { mutableStateOf(false) }
     var storeToEdit by remember { mutableStateOf<Store?>(null) }
     var productToAdjust by remember { mutableStateOf<Product?>(null) }
     var preselectedPosProductId by remember { mutableStateOf<Long?>(null) }
@@ -156,6 +159,12 @@ fun MainApp(factory: PosViewModelFactory) {
                     }
                 },
                 actions = {
+                    IconButton(
+                        onClick = { showCatalogManagement = true },
+                        modifier = Modifier.testTag("topbar_manage_catalogs")
+                    ) {
+                        Icon(Icons.Default.Settings, contentDescription = "Configuración de categorías y proveedores", tint = MaterialTheme.colorScheme.primary)
+                    }
                     IconButton(
                         onClick = {
                             storeToEdit = null
@@ -369,6 +378,17 @@ fun MainApp(factory: PosViewModelFactory) {
             onDeleteStore = { store ->
                 viewModel.deleteStore(store)
             }
+        )
+    }
+
+    // Category and supplier catalogs are managed separately from products.
+    if (showCatalogManagement) {
+        CatalogManagementDialog(
+            categories = allCategories,
+            suppliers = allSuppliers,
+            onAdd = { name, type -> viewModel.addCatalogItem(name, type) },
+            onDelete = { name, type -> viewModel.deleteCatalogItem(name, type) },
+            onDismiss = { showCatalogManagement = false }
         )
     }
 
