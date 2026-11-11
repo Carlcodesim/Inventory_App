@@ -2,6 +2,7 @@ package com.example.data.repository
 
 import androidx.room.withTransaction
 import com.example.data.local.AppDatabase
+import com.example.data.model.CatalogItem
 import com.example.data.model.MovementType
 import com.example.data.model.Product
 import com.example.data.model.Sale
@@ -14,6 +15,7 @@ class PosRepository(private val db: AppDatabase) {
     private val productDao = db.productDao()
     private val saleDao = db.saleDao()
     private val kardexDao = db.kardexDao()
+    private val catalogDao = db.catalogDao()
 
     // --- Stores ---
     fun getAllStores(): Flow<List<Store>> = storeDao.getAllStores()
@@ -37,9 +39,28 @@ class PosRepository(private val db: AppDatabase) {
     fun getProductsByStore(storeId: Long): Flow<List<Product>> =
         productDao.getProductsByStore(storeId)
 
-    fun getAllCategories(): Flow<List<String>> = productDao.getAllCategories()
+    fun getAllCategories(): Flow<List<String>> = catalogDao.getCategories()
 
-    fun getAllSuppliers(): Flow<List<String>> = productDao.getAllSuppliers()
+    fun getAllSuppliers(): Flow<List<String>> = catalogDao.getSuppliers()
+
+    suspend fun addCatalogItem(name: String, type: String) {
+        val cleanName = name.trim()
+        require(cleanName.isNotBlank()) { "El nombre no puede estar vacío" }
+        require(type == "CATEGORY" || type == "SUPPLIER") { "Tipo de catálogo no válido" }
+        catalogDao.insert(CatalogItem(name = cleanName, type = type))
+    }
+
+    suspend fun deleteCatalogItem(name: String, type: String) {
+        val item = CatalogItem(name = name, type = type)
+        // Resolve by its unique type/name pair without touching products.
+        db.withTransaction {
+            val id = db.openHelper.writableDatabase.query(
+                "SELECT id FROM catalog_items WHERE type = ? AND name = ? COLLATE NOCASE LIMIT 1",
+                arrayOf(type, name)
+            ).use { cursor -> if (cursor.moveToFirst()) cursor.getLong(0) else null }
+            if (id != null) catalogDao.deleteById(id)
+        }
+    }
 
     suspend fun getProductById(id: Long): Product? = productDao.getProductById(id)
 
