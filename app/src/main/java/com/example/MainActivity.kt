@@ -278,6 +278,12 @@ fun MainApp(factory: PosViewModelFactory) {
                         onCategoryChange = { viewModel.setSelectedCategory(it) },
                         onSupplierChange = { viewModel.setSelectedSupplier(it) },
                         onStockFilterChange = { viewModel.setStockFilter(it) },
+                        onClearFilters = {
+                            viewModel.setSearchQuery("")
+                            viewModel.setSelectedCategory(null)
+                            viewModel.setSelectedSupplier(null)
+                            viewModel.setStockFilter(com.example.ui.StockFilter.ALL)
+                        },
                         onAddProductClick = {
                             productToEdit = null
                             showProductForm = true
