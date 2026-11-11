@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -72,6 +73,7 @@ fun InventoryScreen(
     onCategoryChange: (String?) -> Unit,
     onSupplierChange: (String?) -> Unit,
     onStockFilterChange: (StockFilter) -> Unit,
+    onClearFilters: () -> Unit,
     onAddProductClick: () -> Unit,
     onQuickSaleClick: (Product) -> Unit,
     onAdjustStockClick: (Product) -> Unit,
@@ -230,7 +232,7 @@ fun InventoryScreen(
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.primary,
                         fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(4.dp)
+                        modifier = Modifier.padding(4.dp).clickable(onClick = onClearFilters)
                     )
                 }
             }
