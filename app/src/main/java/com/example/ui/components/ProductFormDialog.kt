@@ -195,6 +195,7 @@ fun ProductFormDialog(
                         readOnly = true,
                         label = { Text("Categoría *") },
                         isError = category.isBlank(),
+                        supportingText = { if (category.isBlank()) Text("Selecciona una categoría desde Configuración") },
                         trailingIcon = { Icon(Icons.Default.KeyboardArrowDown, contentDescription = null) },
                         modifier = Modifier.fillMaxWidth().clickable { categoryDropdownExpanded = true }
                             .testTag("product_category_input")
@@ -376,7 +377,9 @@ fun ProductFormDialog(
                 OutlinedTextField(
                     value = photoUrl,
                     onValueChange = { photoUrl = it; photoLoadFailed = false },
-                    label = { Text("URL de la Foto") },
+                    label = { Text("URL directa de la Foto") },
+                    placeholder = { Text("https://sitio.com/imagen.jpg") },
+                    supportingText = { Text("Debe ser un enlace directo a un archivo de imagen, no a la página del producto.") },
                     leadingIcon = { Icon(Icons.Default.Image, contentDescription = null) },
                     modifier = Modifier
                         .fillMaxWidth()
