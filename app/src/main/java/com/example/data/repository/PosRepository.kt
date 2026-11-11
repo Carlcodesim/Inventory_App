@@ -51,7 +51,6 @@ class PosRepository(private val db: AppDatabase) {
     }
 
     suspend fun deleteCatalogItem(name: String, type: String) {
-        val item = CatalogItem(name = name, type = type)
         // Resolve by its unique type/name pair without touching products.
         db.withTransaction {
             val id = db.openHelper.writableDatabase.query(
