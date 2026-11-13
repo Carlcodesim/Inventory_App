@@ -31,9 +31,6 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.ExposedDropdownMenu
-import androidx.compose.material3.ExposedDropdownMenuBox
-import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -190,12 +187,8 @@ fun ProductFormDialog(
                     singleLine = true
                 )
 
-                // Catalog selectors use Material 3's anchored dropdown component.
-                ExposedDropdownMenuBox(
-                    expanded = categoryDropdownExpanded,
-                    onExpandedChange = { categoryDropdownExpanded = it },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
+                // Category and supplier options are stored in Room and observed by the ViewModel.
+                Box(modifier = Modifier.fillMaxWidth()) {
                     OutlinedTextField(
                         value = category.ifBlank { "Seleccionar categoría" },
                         onValueChange = {},
@@ -210,13 +203,16 @@ fun ProductFormDialog(
                                 )
                             }
                         },
-                        trailingIcon = {
-                            ExposedDropdownMenuDefaults.TrailingIcon(expanded = categoryDropdownExpanded)
-                        },
-                        modifier = Modifier.menuAnchor().fillMaxWidth()
-                            .testTag("product_category_input")
+                        trailingIcon = { Icon(Icons.Default.KeyboardArrowDown, contentDescription = null) },
+                        modifier = Modifier.fillMaxWidth().testTag("product_category_input")
                     )
-                    ExposedDropdownMenu(
+                    // A transparent overlay receives taps reliably without the TextField consuming them.
+                    Box(
+                        modifier = Modifier.matchParentSize().clickable {
+                            categoryDropdownExpanded = true
+                        }
+                    )
+                    DropdownMenu(
                         expanded = categoryDropdownExpanded,
                         onDismissRequest = { categoryDropdownExpanded = false }
                     ) {
@@ -236,23 +232,21 @@ fun ProductFormDialog(
                     }
                 }
 
-                ExposedDropdownMenuBox(
-                    expanded = supplierDropdownExpanded,
-                    onExpandedChange = { supplierDropdownExpanded = it },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
+                Box(modifier = Modifier.fillMaxWidth()) {
                     OutlinedTextField(
                         value = supplier.ifBlank { "Sin proveedor" },
                         onValueChange = {},
                         readOnly = true,
                         label = { Text("Proveedor (opcional)") },
-                        trailingIcon = {
-                            ExposedDropdownMenuDefaults.TrailingIcon(expanded = supplierDropdownExpanded)
-                        },
-                        modifier = Modifier.menuAnchor().fillMaxWidth()
-                            .testTag("product_supplier_input")
+                        trailingIcon = { Icon(Icons.Default.KeyboardArrowDown, contentDescription = null) },
+                        modifier = Modifier.fillMaxWidth().testTag("product_supplier_input")
                     )
-                    ExposedDropdownMenu(
+                    Box(
+                        modifier = Modifier.matchParentSize().clickable {
+                            supplierDropdownExpanded = true
+                        }
+                    )
+                    DropdownMenu(
                         expanded = supplierDropdownExpanded,
                         onDismissRequest = { supplierDropdownExpanded = false }
                     ) {
