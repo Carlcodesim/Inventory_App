@@ -16,3 +16,9 @@
 local.properties
 .env
 debug.keystore
+
+# Node / TypeScript
+node_modules/
+server/node_modules/
+server/dist/
+server/data/
