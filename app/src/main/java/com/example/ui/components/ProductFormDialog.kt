@@ -31,6 +31,9 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.ExposedDropdownMenu
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -187,20 +190,33 @@ fun ProductFormDialog(
                     singleLine = true
                 )
 
-                // Categories and suppliers are selected from the catalogs in Settings.
-                Box(modifier = Modifier.fillMaxWidth()) {
+                // Catalog selectors use Material 3's anchored dropdown component.
+                ExposedDropdownMenuBox(
+                    expanded = categoryDropdownExpanded,
+                    onExpandedChange = { categoryDropdownExpanded = it },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
                     OutlinedTextField(
                         value = category.ifBlank { "Seleccionar categoría" },
                         onValueChange = {},
                         readOnly = true,
                         label = { Text("Categoría *") },
                         isError = category.isBlank(),
-                        supportingText = { if (category.isBlank()) Text("Selecciona una categoría desde Configuración") },
-                        trailingIcon = { Icon(Icons.Default.KeyboardArrowDown, contentDescription = null) },
-                        modifier = Modifier.fillMaxWidth().clickable { categoryDropdownExpanded = true }
+                        supportingText = {
+                            if (category.isBlank()) {
+                                Text(
+                                    if (existingCategories.isEmpty()) "Agrega categorías desde Configuración"
+                                    else "Selecciona una categoría"
+                                )
+                            }
+                        },
+                        trailingIcon = {
+                            ExposedDropdownMenuDefaults.TrailingIcon(expanded = categoryDropdownExpanded)
+                        },
+                        modifier = Modifier.menuAnchor().fillMaxWidth()
                             .testTag("product_category_input")
                     )
-                    DropdownMenu(
+                    ExposedDropdownMenu(
                         expanded = categoryDropdownExpanded,
                         onDismissRequest = { categoryDropdownExpanded = false }
                     ) {
@@ -212,7 +228,7 @@ fun ProductFormDialog(
                         }
                         if (existingCategories.isEmpty()) {
                             DropdownMenuItem(
-                                text = { Text("Agrega categorías desde Configuración") },
+                                text = { Text("No hay categorías registradas") },
                                 enabled = false,
                                 onClick = {}
                             )
@@ -220,17 +236,23 @@ fun ProductFormDialog(
                     }
                 }
 
-                Box(modifier = Modifier.fillMaxWidth()) {
+                ExposedDropdownMenuBox(
+                    expanded = supplierDropdownExpanded,
+                    onExpandedChange = { supplierDropdownExpanded = it },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
                     OutlinedTextField(
                         value = supplier.ifBlank { "Sin proveedor" },
                         onValueChange = {},
                         readOnly = true,
                         label = { Text("Proveedor (opcional)") },
-                        trailingIcon = { Icon(Icons.Default.KeyboardArrowDown, contentDescription = null) },
-                        modifier = Modifier.fillMaxWidth().clickable { supplierDropdownExpanded = true }
+                        trailingIcon = {
+                            ExposedDropdownMenuDefaults.TrailingIcon(expanded = supplierDropdownExpanded)
+                        },
+                        modifier = Modifier.menuAnchor().fillMaxWidth()
                             .testTag("product_supplier_input")
                     )
-                    DropdownMenu(
+                    ExposedDropdownMenu(
                         expanded = supplierDropdownExpanded,
                         onDismissRequest = { supplierDropdownExpanded = false }
                     ) {
@@ -242,6 +264,13 @@ fun ProductFormDialog(
                             DropdownMenuItem(
                                 text = { Text(option) },
                                 onClick = { supplier = option; supplierDropdownExpanded = false }
+                            )
+                        }
+                        if (existingSuppliers.isEmpty()) {
+                            DropdownMenuItem(
+                                text = { Text("No hay proveedores registrados") },
+                                enabled = false,
+                                onClick = {}
                             )
                         }
                     }
