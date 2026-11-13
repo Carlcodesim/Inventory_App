@@ -10,6 +10,34 @@ const host = process.env.HOST ?? "0.0.0.0";
 app.disable("x-powered-by");
 app.use(express.json({ limit: "256kb" }));
 
+const pairingAttempts = new Map<string, { count: number; windowStartedAt: number }>();
+const pairingWindowMs = 10 * 60_000;
+const pairingMaxAttempts = 10;
+
+function limitPairingAttempts(request: express.Request, response: express.Response, next: express.NextFunction) {
+  const now = Date.now();
+  const ip = request.ip || request.socket.remoteAddress || "unknown";
+
+  for (const [key, value] of pairingAttempts) {
+    if (now - value.windowStartedAt >= pairingWindowMs) pairingAttempts.delete(key);
+  }
+
+  const current = pairingAttempts.get(ip);
+  if (!current || now - current.windowStartedAt >= pairingWindowMs) {
+    pairingAttempts.set(ip, { count: 1, windowStartedAt: now });
+    next();
+    return;
+  }
+
+  if (current.count >= pairingMaxAttempts) {
+    response.status(429).json({ error: "too_many_attempts", message: "Demasiados intentos. Espera diez minutos y vuelve a intentarlo." });
+    return;
+  }
+
+  current.count += 1;
+  next();
+}
+
 app.get("/api/v1/health", (_request, response) => {
   const database = db.prepare("SELECT 1 AS ok").get() as { ok: number };
   response.json({
@@ -34,7 +62,7 @@ app.get("/api/v1/server-info", (_request, response) => {
   });
 });
 
-app.post("/api/v1/pairing/exchange", (request, response) => {
+app.post("/api/v1/pairing/exchange", limitPairingAttempts, (request, response) => {
   const { pairingCode, deviceId, deviceName } = request.body ?? {};
   const normalizedCode = typeof pairingCode === "string" ? pairingCode.trim().toLowerCase() : "";
   const normalizedDeviceId = typeof deviceId === "string" ? deviceId.trim().toLowerCase() : "";
