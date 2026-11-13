@@ -1,5 +1,6 @@
 import express from "express";
 import os from "node:os";
+import { createHash, randomBytes } from "node:crypto";
 import { databaseFilePath, db } from "./database.js";
 
 const app = express();
@@ -31,6 +32,59 @@ app.get("/api/v1/server-info", (_request, response) => {
     addresses: interfaces.map((address) => `http://${address}:${port}`),
     databaseConfigured: Boolean(databaseFilePath)
   });
+});
+
+app.post("/api/v1/pairing/exchange", (request, response) => {
+  const { pairingCode, deviceId, deviceName } = request.body ?? {};
+  const normalizedCode = typeof pairingCode === "string" ? pairingCode.trim().toLowerCase() : "";
+  const normalizedDeviceId = typeof deviceId === "string" ? deviceId.trim().toLowerCase() : "";
+  const normalizedDeviceName = typeof deviceName === "string" ? deviceName.trim() : "";
+
+  if (!/^[a-f0-9]{20}$/.test(normalizedCode)
+    || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(normalizedDeviceId)
+    || normalizedDeviceName.length < 1
+    || normalizedDeviceName.length > 80) {
+    response.status(400).json({ error: "invalid_request", message: "Datos de emparejamiento inválidos." });
+    return;
+  }
+
+  const codeHash = createHash("sha256").update(normalizedCode).digest("hex");
+  const token = randomBytes(32).toString("base64url");
+  const tokenHash = createHash("sha256").update(token).digest("hex");
+  const now = Date.now();
+
+  const exchange = db.transaction(() => {
+    const code = db.prepare(
+      "SELECT code_hash FROM pairing_codes WHERE code_hash = ? AND consumed_at IS NULL AND expires_at > ?"
+    ).get(codeHash, now);
+
+    if (!code) return false;
+
+    const consumed = db.prepare(
+      "UPDATE pairing_codes SET consumed_at = ? WHERE code_hash = ? AND consumed_at IS NULL AND expires_at > ?"
+    ).run(now, codeHash, now);
+
+    if (consumed.changes !== 1) return false;
+
+    db.prepare(`
+      INSERT INTO devices (device_id, device_name, token_hash, created_at, last_seen_at, revoked_at)
+      VALUES (?, ?, ?, ?, ?, NULL)
+      ON CONFLICT(device_id) DO UPDATE SET
+        device_name = excluded.device_name,
+        token_hash = excluded.token_hash,
+        last_seen_at = excluded.last_seen_at,
+        revoked_at = NULL
+    `).run(normalizedDeviceId, normalizedDeviceName, tokenHash, now, now);
+
+    return true;
+  });
+
+  if (!exchange()) {
+    response.status(401).json({ error: "pairing_code_rejected", message: "El código es inválido, venció o ya fue utilizado." });
+    return;
+  }
+
+  response.json({ deviceId: normalizedDeviceId, accessToken: token, tokenType: "Bearer" });
 });
 
 app.listen(port, host, () => {
