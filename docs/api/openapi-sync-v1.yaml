@@ -32,12 +32,12 @@ paths:
               type: object
               required: [pairingCode, deviceId, deviceName]
               properties:
-                pairingCode: { type: string }
+                pairingCode: { type: string, pattern: "^[a-f0-9]{20}$", description: "Código hexadecimal de un solo uso generado en el servidor; vence en cinco minutos." }
                 deviceId: { type: string, format: uuid }
                 deviceName: { type: string, maxLength: 80 }
       responses:
         "200":
-          description: Dispositivo autorizado
+          description: Dispositivo autorizado; el accessToken se muestra una sola vez y debe guardarse de forma segura en Android
         "401":
           description: Código inválido, vencido o ya utilizado
   /bootstrap:
