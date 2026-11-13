@@ -55,10 +55,10 @@ class PosViewModel(private val repository: PosRepository) : ViewModel() {
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val allCategories: StateFlow<List<String>> = repository.getAllCategories()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     val allSuppliers: StateFlow<List<String>> = repository.getAllSuppliers()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     private val allProducts = repository.getAllProducts()
     private val allSales = repository.getAllSales()
