@@ -1,0 +1,94 @@
+openapi: 3.1.0
+info:
+  title: Inventory_App Sync API
+  version: 1.0.0
+  description: Contrato inicial de sincronización LAN entre el panel web de Windows y Android.
+servers:
+  - url: http://{pcHost}:{port}/api/v1
+    variables:
+      pcHost:
+        default: 192.168.1.10
+      port:
+        default: "8787"
+security:
+  - DeviceBearer: []
+paths:
+  /health:
+    get:
+      security: []
+      summary: Estado del servidor
+      responses:
+        "200":
+          description: Servidor disponible
+  /pairing/exchange:
+    post:
+      security: []
+      summary: Canjear código temporal de emparejamiento
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [pairingCode, deviceId, deviceName]
+              properties:
+                pairingCode: { type: string }
+                deviceId: { type: string, format: uuid }
+                deviceName: { type: string, maxLength: 80 }
+      responses:
+        "200":
+          description: Dispositivo autorizado
+        "401":
+          description: Código inválido, vencido o ya utilizado
+  /bootstrap:
+    get:
+      summary: Estado inicial para un dispositivo nuevo
+      responses:
+        "200":
+          description: Datos iniciales y cursor de sincronización
+  /sync/changes:
+    get:
+      summary: Descargar cambios posteriores al cursor
+      parameters:
+        - in: query
+          name: cursor
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Lote ordenado de cambios y nuevo cursor
+  /sync/operations:
+    post:
+      summary: Enviar operaciones pendientes de forma idempotente
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [deviceId, operations]
+              properties:
+                deviceId: { type: string, format: uuid }
+                operations:
+                  type: array
+                  maxItems: 100
+                  items:
+                    type: object
+                    required: [operationId, type, payload]
+                    properties:
+                      operationId: { type: string, format: uuid }
+                      type:
+                        type: string
+                        enum: [store.upsert, product.upsert, product.delete, catalog.upsert, catalog.delete, sale.create, stock.adjust]
+                      payload: { type: object, additionalProperties: true }
+      responses:
+        "200":
+          description: Resultado individual por operación
+        "409":
+          description: Conflicto de versión o regla de inventario
+components:
+  securitySchemes:
+    DeviceBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque
