@@ -114,33 +114,37 @@ paths:
           description: Lote ordenado de cambios y nuevo cursor
   /sync/operations:
     post:
-      summary: Enviar operaciones pendientes de forma idempotente
+      summary: Procesar ventas y ajustes de inventario de forma idempotente
+      description: El dispositivo se identifica por Bearer token. Cada operación se confirma en su propia transacción; repetir operationId desde el mismo dispositivo devuelve el recibo previo.
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [deviceId, operations]
+              required: [operations]
               properties:
-                deviceId: { type: string, format: uuid }
                 operations:
                   type: array
+                  minItems: 1
                   maxItems: 100
                   items:
                     type: object
                     required: [operationId, type, payload]
                     properties:
                       operationId: { type: string, format: uuid }
-                      type:
-                        type: string
-                        enum: [store.upsert, product.upsert, product.delete, catalog.upsert, catalog.delete, sale.create, stock.adjust]
-                      payload: { type: object, additionalProperties: true }
+                      type: { type: string, enum: [sale.create, stock.adjust] }
+                      payload:
+                        type: object
+                        description: Para sale.create requiere storeSyncId, productSyncId y quantity. Para stock.adjust requiere storeSyncId, productSyncId, delta y reason.
+                        additionalProperties: true
       responses:
         "200":
-          description: Resultado individual por operación
+          description: Resultado por operación; comprobar status applied o rejected
+        "401":
+          description: Dispositivo no autorizado
         "409":
-          description: Conflicto de versión o regla de inventario
+          description: Conflicto de identificador o regla de inventario
 components:
   securitySchemes:
     DeviceBearer:
