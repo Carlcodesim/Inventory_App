@@ -1,6 +1,6 @@
 import express from "express";
 import os from "node:os";
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { databaseFilePath, db } from "./database.js";
 
 const app = express();
@@ -158,6 +158,37 @@ function logChange(entityType: string, syncId: string, operation: "upsert" | "de
 
 app.use("/api/v1", requireDevice);
 
+
+app.get("/api/v1/bootstrap", (_request, response) => {
+  const stores = db.prepare("SELECT sync_id AS syncId, name, logo_url AS logoUrl, address, phone, color_hex AS colorHex, version FROM stores WHERE deleted_at IS NULL ORDER BY name").all();
+  const catalog = db.prepare("SELECT sync_id AS syncId, name, type, version FROM catalog_items WHERE deleted_at IS NULL ORDER BY type, name").all();
+  const products = db.prepare(`SELECT sync_id AS syncId, store_sync_id AS storeSyncId, name, category, supplier,
+    cost_price_minor AS costPriceMinor, sale_price_minor AS salePriceMinor, stock,
+    min_stock_alert AS minStockAlert, photo_url AS photoUrl, sale_link AS saleLink, version
+    FROM products WHERE deleted_at IS NULL ORDER BY name`).all();
+  const cursor = db.prepare("SELECT COALESCE(MAX(cursor), 0) AS cursor FROM change_log").get() as { cursor: number };
+  response.json({ stores, catalog, products, cursor: cursor.cursor });
+});
+
+app.get("/api/v1/sync/changes", (request, response) => {
+  const cursorValue = request.query.cursor;
+  const limitValue = request.query.limit ?? "200";
+  const cursor = typeof cursorValue === "string" && /^\\d+$/.test(cursorValue) ? Number(cursorValue) : NaN;
+  const limit = typeof limitValue === "string" && /^\\d+$/.test(limitValue) ? Number(limitValue) : NaN;
+  if (!Number.isSafeInteger(cursor) || cursor < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 500) {
+    response.status(400).json({ error: "invalid_sync_cursor", message: "El cursor debe ser un entero no negativo y el límite debe estar entre 1 y 500." });
+    return;
+  }
+  const changes = db.prepare(`
+    SELECT cursor, entity_type AS entityType, entity_sync_id AS entitySyncId,
+      operation, payload_json AS payloadJson, created_at AS createdAt
+    FROM change_log WHERE cursor > ? ORDER BY cursor ASC LIMIT ?
+  `).all(cursor, limit) as Array<{ cursor: number; entityType: string; entitySyncId: string; operation: string; payloadJson: string; createdAt: number }>;
+  const items = changes.map(({ payloadJson, ...change }) => ({ ...change, payload: JSON.parse(payloadJson) as unknown }));
+  const nextCursor = items.length ? items[items.length - 1].cursor : cursor;
+  response.json({ items, nextCursor, hasMore: items.length === limit });
+});
+
 app.get("/api/v1/stores", (_request, response) => {
   const rows = db.prepare(
     "SELECT sync_id AS syncId, name, logo_url AS logoUrl, address, phone, color_hex AS colorHex, version, created_at AS createdAt, updated_at AS updatedAt FROM stores WHERE deleted_at IS NULL ORDER BY name"
@@ -174,7 +205,7 @@ app.post("/api/v1/stores", (request, response) => {
   }
 
   const now = Date.now();
-  const syncId = randomBytes(16).toString("hex");
+  const syncId = randomUUID();
   db.prepare(`
     INSERT INTO stores (sync_id, name, logo_url, address, phone, color_hex, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -211,7 +242,7 @@ app.post("/api/v1/catalog", (request, response) => {
     "SELECT sync_id FROM catalog_items WHERE type = ? AND name = ?"
   ).get(type, normalizedName) as { sync_id: string } | undefined;
   const now = Date.now();
-  const syncId = existing?.sync_id ?? randomBytes(16).toString("hex");
+  const syncId = existing?.sync_id ?? randomUUID();
 
   db.prepare(`
     INSERT INTO catalog_items (sync_id, name, type, created_at, updated_at, version, deleted_at)
@@ -265,7 +296,7 @@ app.post("/api/v1/products", (request, response) => {
   }
 
   const now = Date.now();
-  const syncId = randomBytes(16).toString("hex");
+  const syncId = randomUUID();
   db.prepare(`
     INSERT INTO products (
       sync_id, store_sync_id, name, category, supplier, cost_price_minor, sale_price_minor,
