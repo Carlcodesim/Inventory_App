@@ -101,7 +101,10 @@ export default function App() {
         path="/api/v1/sync/operations";
         body={operations:[{operationId:createDeviceId(),type:"stock.adjust",payload:{storeSyncId:draft.storeSyncId,productSyncId:editor.id,delta:Number(draft.delta),reason:draft.reason}}]};
       }
-      await api(path,{method,body:JSON.stringify(body)});
+      const result = await api<{items?:Array<{status?:string;message?:string;error?:string}>}>(path,{method,body:JSON.stringify(body)});
+      if (editor.kind === "adjust" && result.items?.[0]?.status === "rejected") {
+        throw new Error(result.items[0].message || "El ajuste fue rechazado por el servidor.");
+      }
       setEditor(null); setNotice(editor.kind==="adjust"?"Ajuste de inventario registrado correctamente.":"Cambios guardados correctamente."); await loadData();
     } catch(e) { setError(e instanceof Error?e.message:"No se pudo guardar."); } finally { setSaving(false); }
   }
