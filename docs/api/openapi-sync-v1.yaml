@@ -97,6 +97,63 @@ paths:
       responses:
         "201":
           description: Producto creado
+  /stores/{syncId}:
+    parameters:
+      - in: path
+        name: syncId
+        required: true
+        schema: { type: string, format: uuid }
+    patch:
+      summary: Actualizar campos de una sucursal
+      description: Incrementa version y publica un evento upsert.
+      responses:
+        "200": { description: Sucursal actualizada }
+        "400": { description: Datos inválidos }
+        "404": { description: Sucursal inexistente o eliminada }
+    delete:
+      summary: Eliminar lógicamente una sucursal
+      description: Solo permite eliminar sucursales sin productos activos. Conserva el registro y su historial.
+      responses:
+        "200": { description: Sucursal marcada como eliminada }
+        "404": { description: Sucursal inexistente o eliminada }
+        "409": { description: La sucursal todavía tiene productos activos }
+  /catalog/{syncId}:
+    parameters:
+      - in: path
+        name: syncId
+        required: true
+        schema: { type: string, format: uuid }
+    patch:
+      summary: Renombrar una categoría o proveedor
+      responses:
+        "200": { description: Elemento actualizado }
+        "409": { description: Ya existe un elemento con ese nombre y tipo }
+    delete:
+      summary: Eliminar lógicamente una categoría o proveedor
+      description: No permite eliminar elementos utilizados por productos activos.
+      responses:
+        "200": { description: Elemento marcado como eliminado }
+        "409": { description: Elemento utilizado por productos activos }
+  /products/{syncId}:
+    parameters:
+      - in: path
+        name: syncId
+        required: true
+        schema: { type: string, format: uuid }
+    patch:
+      summary: Actualizar datos de un producto
+      description: No permite modificar stock ni sucursal; el stock solo cambia mediante operaciones de inventario.
+      responses:
+        "200": { description: Producto actualizado }
+        "400": { description: Datos inválidos o sin campos actualizables }
+        "404": { description: Producto inexistente o eliminado }
+    delete:
+      summary: Eliminar lógicamente un producto
+      description: Solo permite eliminar productos con stock exactamente igual a cero. Ventas y movimientos históricos se conservan.
+      responses:
+        "200": { description: Producto marcado como eliminado }
+        "404": { description: Producto inexistente o eliminado }
+        "409": { description: El producto todavía tiene existencias }
   /sync/changes:
     get:
       summary: Descargar cambios posteriores al cursor
