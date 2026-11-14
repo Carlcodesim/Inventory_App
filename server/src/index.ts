@@ -315,6 +315,216 @@ app.post("/api/v1/products", (request, response) => {
 });
 
 
+
+function getStore(syncId: string) {
+  return db.prepare("SELECT sync_id AS syncId, name, logo_url AS logoUrl, address, phone, color_hex AS colorHex, version, created_at AS createdAt, updated_at AS updatedAt FROM stores WHERE sync_id = ? AND deleted_at IS NULL").get(syncId) as Record<string, unknown> | undefined;
+}
+
+function getCatalogItem(syncId: string) {
+  return db.prepare("SELECT sync_id AS syncId, name, type, version, created_at AS createdAt, updated_at AS updatedAt FROM catalog_items WHERE sync_id = ? AND deleted_at IS NULL").get(syncId) as Record<string, unknown> | undefined;
+}
+
+function getProduct(syncId: string) {
+  return db.prepare("SELECT sync_id AS syncId, store_sync_id AS storeSyncId, name, category, supplier, cost_price_minor AS costPriceMinor, sale_price_minor AS salePriceMinor, stock, min_stock_alert AS minStockAlert, photo_url AS photoUrl, sale_link AS saleLink, version, created_at AS createdAt, updated_at AS updatedAt FROM products WHERE sync_id = ? AND deleted_at IS NULL").get(syncId) as Record<string, unknown> | undefined;
+}
+
+app.patch("/api/v1/stores/:syncId", (request, response) => {
+  const syncId = request.params.syncId;
+  if (!isUuid(syncId)) {
+    response.status(400).json({ error: "invalid_sync_id", message: "El syncId no es válido." });
+    return;
+  }
+  const current = getStore(syncId);
+  if (!current) {
+    response.status(404).json({ error: "store_not_found", message: "La sucursal no existe o fue eliminada." });
+    return;
+  }
+  const body = request.body ?? {};
+  const fields = [
+    ["name", "name", 120, true],
+    ["logoUrl", "logo_url", 2048, false],
+    ["address", "address", 240, false],
+    ["phone", "phone", 40, false],
+    ["colorHex", "color_hex", 16, false]
+  ] as const;
+  const updates: string[] = [];
+  const values: unknown[] = [];
+  for (const [input, column, max, required] of fields) {
+    if (Object.hasOwn(body, input)) {
+      if (!isText(body[input], max, required ? 1 : 0)) {
+        response.status(400).json({ error: "invalid_store", message: "Uno o más campos de la sucursal son inválidos." });
+        return;
+      }
+      updates.push(column + " = ?");
+      values.push(body[input].trim());
+    }
+  }
+  if (updates.length === 0) {
+    response.status(400).json({ error: "empty_update", message: "Indica al menos un campo para actualizar." });
+    return;
+  }
+  const now = Date.now();
+  updates.push("updated_at = ?", "version = version + 1");
+  values.push(now, syncId);
+  db.prepare("UPDATE stores SET " + updates.join(", ") + " WHERE sync_id = ? AND deleted_at IS NULL").run(...values);
+  const item = getStore(syncId);
+  logChange("store", syncId, "upsert", item);
+  response.json({ item });
+});
+
+app.delete("/api/v1/stores/:syncId", (request, response) => {
+  const syncId = request.params.syncId;
+  if (!isUuid(syncId)) {
+    response.status(400).json({ error: "invalid_sync_id", message: "El syncId no es válido." });
+    return;
+  }
+  const current = getStore(syncId);
+  if (!current) {
+    response.status(404).json({ error: "store_not_found", message: "La sucursal no existe o ya fue eliminada." });
+    return;
+  }
+  const activeProducts = db.prepare("SELECT COUNT(*) AS total FROM products WHERE store_sync_id = ? AND deleted_at IS NULL").get(syncId) as { total: number };
+  if (activeProducts.total > 0) {
+    response.status(409).json({ error: "store_has_products", message: "Primero elimina o traslada los productos activos de esta sucursal." });
+    return;
+  }
+  const now = Date.now();
+  db.prepare("UPDATE stores SET deleted_at = ?, updated_at = ?, version = version + 1 WHERE sync_id = ? AND deleted_at IS NULL").run(now, now, syncId);
+  logChange("store", syncId, "delete", { syncId, deletedAt: now, version: Number(current.version) + 1 });
+  response.json({ deleted: true, syncId, deletedAt: now });
+});
+
+app.patch("/api/v1/catalog/:syncId", (request, response) => {
+  const syncId = request.params.syncId;
+  if (!isUuid(syncId)) {
+    response.status(400).json({ error: "invalid_sync_id", message: "El syncId no es válido." });
+    return;
+  }
+  const current = getCatalogItem(syncId) as { syncId: string; name: string; type: string; version: number } | undefined;
+  if (!current) {
+    response.status(404).json({ error: "catalog_item_not_found", message: "El elemento no existe o fue eliminado." });
+    return;
+  }
+  const name = request.body?.name;
+  if (!isText(name, 100, 1)) {
+    response.status(400).json({ error: "invalid_catalog_item", message: "El nombre debe contener entre 1 y 100 caracteres." });
+    return;
+  }
+  const normalizedName = name.trim();
+  const conflict = db.prepare("SELECT sync_id FROM catalog_items WHERE type = ? AND name = ? AND sync_id <> ?").get(current.type, normalizedName, syncId);
+  if (conflict) {
+    response.status(409).json({ error: "catalog_name_conflict", message: "Ya existe un elemento con ese nombre y tipo." });
+    return;
+  }
+  const now = Date.now();
+  db.prepare("UPDATE catalog_items SET name = ?, updated_at = ?, version = version + 1 WHERE sync_id = ? AND deleted_at IS NULL").run(normalizedName, now, syncId);
+  const item = getCatalogItem(syncId);
+  logChange("catalog", syncId, "upsert", item);
+  response.json({ item });
+});
+
+app.delete("/api/v1/catalog/:syncId", (request, response) => {
+  const syncId = request.params.syncId;
+  if (!isUuid(syncId)) {
+    response.status(400).json({ error: "invalid_sync_id", message: "El syncId no es válido." });
+    return;
+  }
+  const current = getCatalogItem(syncId) as { syncId: string; name: string; type: string; version: number } | undefined;
+  if (!current) {
+    response.status(404).json({ error: "catalog_item_not_found", message: "El elemento no existe o ya fue eliminado." });
+    return;
+  }
+  const column = current.type === "CATEGORY" ? "category" : "supplier";
+  const references = db.prepare("SELECT COUNT(*) AS total FROM products WHERE deleted_at IS NULL AND " + column + " = ?").get(current.name) as { total: number };
+  if (references.total > 0) {
+    response.status(409).json({ error: "catalog_item_in_use", message: "No se puede eliminar: hay productos activos que utilizan este elemento." });
+    return;
+  }
+  const now = Date.now();
+  db.prepare("UPDATE catalog_items SET deleted_at = ?, updated_at = ?, version = version + 1 WHERE sync_id = ? AND deleted_at IS NULL").run(now, now, syncId);
+  logChange("catalog", syncId, "delete", { syncId, type: current.type, deletedAt: now, version: current.version + 1 });
+  response.json({ deleted: true, syncId, deletedAt: now });
+});
+
+app.patch("/api/v1/products/:syncId", (request, response) => {
+  const syncId = request.params.syncId;
+  if (!isUuid(syncId)) {
+    response.status(400).json({ error: "invalid_sync_id", message: "El syncId no es válido." });
+    return;
+  }
+  const current = getProduct(syncId);
+  if (!current) {
+    response.status(404).json({ error: "product_not_found", message: "El producto no existe o fue eliminado." });
+    return;
+  }
+  const body = request.body ?? {};
+  const fields = [
+    ["name", "name", 160, true],
+    ["category", "category", 100, true],
+    ["supplier", "supplier", 100, false],
+    ["costPriceMinor", "cost_price_minor", 0, false],
+    ["salePriceMinor", "sale_price_minor", 0, false],
+    ["minStockAlert", "min_stock_alert", 0, false],
+    ["photoUrl", "photo_url", 2048, false],
+    ["saleLink", "sale_link", 2048, false]
+  ] as const;
+  const updates: string[] = [];
+  const values: unknown[] = [];
+  for (const [input, column, max, required] of fields) {
+    if (Object.hasOwn(body, input)) {
+      const value = body[input];
+      if (input === "costPriceMinor" || input === "salePriceMinor" || input === "minStockAlert") {
+        if (!isNonNegativeInteger(value)) {
+          response.status(400).json({ error: "invalid_product", message: "Los importes y alertas deben ser enteros no negativos." });
+          return;
+        }
+        updates.push(column + " = ?");
+        values.push(value);
+      } else {
+        if (!isText(value, max, required ? 1 : 0)) {
+          response.status(400).json({ error: "invalid_product", message: "Uno o más campos del producto son inválidos." });
+          return;
+        }
+        updates.push(column + " = ?");
+        values.push(value.trim());
+      }
+    }
+  }
+  if (updates.length === 0) {
+    response.status(400).json({ error: "empty_update", message: "Indica al menos un campo para actualizar." });
+    return;
+  }
+  const now = Date.now();
+  updates.push("updated_at = ?", "version = version + 1");
+  values.push(now, syncId);
+  db.prepare("UPDATE products SET " + updates.join(", ") + " WHERE sync_id = ? AND deleted_at IS NULL").run(...values);
+  const item = getProduct(syncId);
+  logChange("product", syncId, "upsert", item);
+  response.json({ item });
+});
+
+app.delete("/api/v1/products/:syncId", (request, response) => {
+  const syncId = request.params.syncId;
+  if (!isUuid(syncId)) {
+    response.status(400).json({ error: "invalid_sync_id", message: "El syncId no es válido." });
+    return;
+  }
+  const current = getProduct(syncId) as { syncId: string; stock: number; version: number } | undefined;
+  if (!current) {
+    response.status(404).json({ error: "product_not_found", message: "El producto no existe o ya fue eliminado." });
+    return;
+  }
+  if (current.stock !== 0) {
+    response.status(409).json({ error: "product_has_stock", message: "No se puede eliminar un producto con existencias. Ajusta el inventario a cero primero." });
+    return;
+  }
+  const now = Date.now();
+  db.prepare("UPDATE products SET deleted_at = ?, updated_at = ?, version = version + 1 WHERE sync_id = ? AND deleted_at IS NULL").run(now, now, syncId);
+  logChange("product", syncId, "delete", { syncId, deletedAt: now, version: current.version + 1 });
+  response.json({ deleted: true, syncId, deletedAt: now });
+});
+
+
 type InventoryOperation = {
   operationId: string;
   type: "sale.create" | "stock.adjust";
