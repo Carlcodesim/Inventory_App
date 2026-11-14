@@ -121,12 +121,13 @@ type AuthenticatedRequest = express.Request & { deviceId?: string };
 function requireDevice(request: AuthenticatedRequest, response: express.Response, next: express.NextFunction) {
   const authorization = request.header("authorization") ?? "";
   const match = /^Bearer ([A-Za-z0-9_-]{40,})$/.exec(authorization);
-  if (!match) {
+  const rawToken = match?.[1];
+  if (!rawToken) {
     response.status(401).json({ error: "unauthorized", message: "Se requiere un token de dispositivo válido." });
     return;
   }
 
-  const tokenHash = createHash("sha256").update(match[1]).digest("hex");
+  const tokenHash = createHash("sha256").update(rawToken).digest("hex");
   const device = db.prepare(
     "SELECT device_id FROM devices WHERE token_hash = ? AND revoked_at IS NULL"
   ).get(tokenHash) as { device_id: string } | undefined;
