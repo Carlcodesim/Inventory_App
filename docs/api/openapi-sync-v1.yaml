@@ -46,6 +46,57 @@ paths:
       responses:
         "200":
           description: Datos iniciales y cursor de sincronización
+  /server-info:
+    get:
+      security: []
+      summary: Direcciones LAN del servidor
+      responses:
+        "200":
+          description: Direcciones IPv4 disponibles y puerto
+  /stores:
+    get:
+      summary: Listar sucursales activas
+      responses:
+        "200":
+          description: Lista de sucursales
+    post:
+      summary: Crear sucursal
+      responses:
+        "201":
+          description: Sucursal creada
+  /catalog:
+    get:
+      summary: Listar categorías y proveedores
+      parameters:
+        - in: query
+          name: type
+          schema: { type: string, enum: [CATEGORY, SUPPLIER] }
+      responses:
+        "200":
+          description: Elementos activos del catálogo
+    post:
+      summary: Crear o reactivar categoría/proveedor
+      responses:
+        "200":
+          description: Elemento existente reactivado
+        "201":
+          description: Elemento creado
+  /products:
+    get:
+      summary: Listar productos
+      parameters:
+        - in: query
+          name: storeSyncId
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Productos activos
+    post:
+      summary: Crear producto
+      description: Los importes se envían como enteros en centavos DOP.
+      responses:
+        "201":
+          description: Producto creado
   /sync/changes:
     get:
       summary: Descargar cambios posteriores al cursor
@@ -53,7 +104,11 @@ paths:
         - in: query
           name: cursor
           required: true
-          schema: { type: string }
+          schema: { type: integer, minimum: 0 }
+        - in: query
+          name: limit
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 500, default: 200 }
       responses:
         "200":
           description: Lote ordenado de cambios y nuevo cursor
