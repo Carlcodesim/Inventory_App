@@ -1,5 +1,6 @@
 import express from "express";
 import os from "node:os";
+import path from "node:path";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { databaseFilePath, db } from "./database.js";
 
@@ -711,6 +712,21 @@ app.post("/api/v1/sync/operations", (request: AuthenticatedRequest, response) =>
   });
 
   response.status(200).json({ items: results });
+});
+
+const webDistDirectory = path.resolve(process.cwd(), "../web/dist");
+app.use(express.static(webDistDirectory));
+app.get("/{*splat}", (request, response, next) => {
+  if (request.path.startsWith("/api/")) {
+    next();
+    return;
+  }
+  response.sendFile(path.join(webDistDirectory, "index.html"), (error) => {
+    if (error) next();
+  });
+});
+app.use("/api", (_request, response) => {
+  response.status(404).json({ error: "not_found", message: "La ruta solicitada no existe." });
 });
 
 app.listen(port, host, () => {
