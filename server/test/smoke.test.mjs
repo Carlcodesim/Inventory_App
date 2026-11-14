@@ -108,4 +108,68 @@ test("LAN API pairing, authorization, CRUD and change feed", async (t) => {
   assert.equal(changes.items.length, 3);
   assert.equal(changes.hasMore, false);
   assert.equal(changes.nextCursor, bootstrap.cursor);
+
+  const saleOperationId = "b5f7d8a1-2c3e-4f60-8a9b-1c2d3e4f5a60";
+  const saleRequest = {
+    operations: [{
+      operationId: saleOperationId,
+      type: "sale.create",
+      payload: { storeSyncId: store.syncId, productSyncId: product.syncId, quantity: 3, customerNote: "Venta de prueba" }
+    }]
+  };
+  const saleResponse = await fetch(`${baseUrl}/api/v1/sync/operations`, {
+    method: "POST", headers, body: JSON.stringify(saleRequest)
+  });
+  assert.equal(saleResponse.status, 200);
+  const saleResult = (await saleResponse.json()).items[0];
+  assert.equal(saleResult.status, "applied");
+  assert.equal(saleResult.totalAmountMinor, 6585);
+  assert.equal(saleResult.netProfitMinor, 2835);
+  assert.equal(saleResult.stock, 5);
+
+  const saleReplayResponse = await fetch(`${baseUrl}/api/v1/sync/operations`, {
+    method: "POST", headers, body: JSON.stringify(saleRequest)
+  });
+  const saleReplay = (await saleReplayResponse.json()).items[0];
+  assert.equal(saleReplay.replayed, true);
+  assert.equal(saleReplay.stock, 5);
+
+  const insufficientResponse = await fetch(`${baseUrl}/api/v1/sync/operations`, {
+    method: "POST", headers,
+    body: JSON.stringify({ operations: [{
+      operationId: "c6a8e9b2-3d4f-4a71-9b0c-2d3e4f5a6b71",
+      type: "sale.create",
+      payload: { storeSyncId: store.syncId, productSyncId: product.syncId, quantity: 6 }
+    }] })
+  });
+  const insufficient = (await insufficientResponse.json()).items[0];
+  assert.equal(insufficient.error, "insufficient_stock");
+
+  const adjustmentResponse = await fetch(`${baseUrl}/api/v1/sync/operations`, {
+    method: "POST", headers,
+    body: JSON.stringify({ operations: [{
+      operationId: "d7b9f0c3-4e5a-4b82-8c1d-3e4f5a6b7c82",
+      type: "stock.adjust",
+      payload: { storeSyncId: store.syncId, productSyncId: product.syncId, delta: -2, reason: "Conteo físico" }
+    }] })
+  });
+  const adjustment = (await adjustmentResponse.json()).items[0];
+  assert.equal(adjustment.status, "applied");
+  assert.equal(adjustment.stock, 3);
+
+  const invalidAdjustmentResponse = await fetch(`${baseUrl}/api/v1/sync/operations`, {
+    method: "POST", headers,
+    body: JSON.stringify({ operations: [{
+      operationId: "e8c0a1d4-5f6b-4c93-9d2e-4f5a6b7c8d93",
+      type: "stock.adjust",
+      payload: { storeSyncId: store.syncId, productSyncId: product.syncId, delta: -4, reason: "Ajuste inválido" }
+    }] })
+  });
+  const invalidAdjustment = (await invalidAdjustmentResponse.json()).items[0];
+  assert.equal(invalidAdjustment.error, "insufficient_stock");
+
+  const finalBootstrapResponse = await fetch(`${baseUrl}/api/v1/bootstrap`, { headers });
+  const finalBootstrap = await finalBootstrapResponse.json();
+  assert.equal(finalBootstrap.products[0].stock, 3);
+  assert.ok(finalBootstrap.cursor > bootstrap.cursor);
 });
