@@ -5,10 +5,12 @@ on:
     branches: [main]
     paths:
       - "server/**"
+      - "web/**"
       - ".github/workflows/server-ci.yml"
   pull_request:
     paths:
       - "server/**"
+      - "web/**"
       - ".github/workflows/server-ci.yml"
   workflow_dispatch:
 
