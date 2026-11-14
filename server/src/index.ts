@@ -186,7 +186,7 @@ app.get("/api/v1/sync/changes", (request, response) => {
     FROM change_log WHERE cursor > ? ORDER BY cursor ASC LIMIT ?
   `).all(cursor, limit) as Array<{ cursor: number; entityType: string; entitySyncId: string; operation: string; payloadJson: string; createdAt: number }>;
   const items = changes.map(({ payloadJson, ...change }) => ({ ...change, payload: JSON.parse(payloadJson) as unknown }));
-  const nextCursor = items.length ? items[items.length - 1].cursor : cursor;
+  const nextCursor = items.at(-1)?.cursor ?? cursor;
   response.json({ items, nextCursor, hasMore: items.length === limit });
 });
 
