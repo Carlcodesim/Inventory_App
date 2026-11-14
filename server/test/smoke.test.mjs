@@ -195,6 +195,11 @@ test("LAN API pairing, authorization, CRUD and change feed", async (t) => {
   assert.equal(patchedProduct.salePriceMinor, 2295);
   assert.equal(patchedProduct.stock, 3);
 
+  const unsafeProductPatch = await fetch(`${baseUrl}/api/v1/products/${product.syncId}`, {
+    method: "PATCH", headers, body: JSON.stringify({ name: "No debe aplicar", stock: 99 })
+  });
+  assert.equal(unsafeProductPatch.status, 400);
+
   const blockedStoreDelete = await fetch(`${baseUrl}/api/v1/stores/${store.syncId}`, { method: "DELETE", headers });
   assert.equal(blockedStoreDelete.status, 409);
   const blockedCatalogDelete = await fetch(`${baseUrl}/api/v1/catalog/${category.syncId}`, { method: "DELETE", headers });
