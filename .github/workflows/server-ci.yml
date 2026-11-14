@@ -34,5 +34,11 @@ jobs:
         run: npm run typecheck
       - name: Build
         run: npm run build
+      - name: Install web dependencies
+        working-directory: web
+        run: npm install
+      - name: Build web panel
+        working-directory: web
+        run: npm run build
       - name: API smoke tests
         run: npm test
