@@ -34,3 +34,5 @@ jobs:
         run: npm run typecheck
       - name: Build
         run: npm run build
+      - name: API smoke tests
+        run: npm test
