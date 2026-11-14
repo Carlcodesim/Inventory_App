@@ -173,8 +173,8 @@ app.get("/api/v1/bootstrap", (_request, response) => {
 app.get("/api/v1/sync/changes", (request, response) => {
   const cursorValue = request.query.cursor;
   const limitValue = request.query.limit ?? "200";
-  const cursor = typeof cursorValue === "string" && /^\\d+$/.test(cursorValue) ? Number(cursorValue) : NaN;
-  const limit = typeof limitValue === "string" && /^\\d+$/.test(limitValue) ? Number(limitValue) : NaN;
+  const cursor = typeof cursorValue === "string" && /^\d+$/.test(cursorValue) ? Number(cursorValue) : NaN;
+  const limit = typeof limitValue === "string" && /^\d+$/.test(limitValue) ? Number(limitValue) : NaN;
   if (!Number.isSafeInteger(cursor) || cursor < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 500) {
     response.status(400).json({ error: "invalid_sync_cursor", message: "El cursor debe ser un entero no negativo y el límite debe estar entre 1 y 500." });
     return;
