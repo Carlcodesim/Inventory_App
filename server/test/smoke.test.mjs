@@ -82,6 +82,7 @@ test("LAN API pairing, authorization, CRUD and change feed", async (t) => {
     body: JSON.stringify({ name: "Accesorios", type: "CATEGORY" })
   });
   assert.equal(categoryResponse.status, 201);
+  const { item: category } = await categoryResponse.json();
 
   const productResponse = await fetch(`${baseUrl}/api/v1/products`, {
     method: "POST", headers,
@@ -172,4 +173,62 @@ test("LAN API pairing, authorization, CRUD and change feed", async (t) => {
   const finalBootstrap = await finalBootstrapResponse.json();
   assert.equal(finalBootstrap.products[0].stock, 3);
   assert.ok(finalBootstrap.cursor > bootstrap.cursor);
+
+  const storePatch = await fetch(`${baseUrl}/api/v1/stores/${store.syncId}`, {
+    method: "PATCH", headers, body: JSON.stringify({ address: "Dirección actualizada" })
+  });
+  assert.equal(storePatch.status, 200);
+  assert.equal((await storePatch.json()).item.address, "Dirección actualizada");
+
+  const catalogPatch = await fetch(`${baseUrl}/api/v1/catalog/${category.syncId}`, {
+    method: "PATCH", headers, body: JSON.stringify({ name: "Accesorios móviles" })
+  });
+  assert.equal(catalogPatch.status, 200);
+  assert.equal((await catalogPatch.json()).item.name, "Accesorios móviles");
+
+  const productPatch = await fetch(`${baseUrl}/api/v1/products/${product.syncId}`, {
+    method: "PATCH", headers, body: JSON.stringify({ name: "Cable USB actualizado", salePriceMinor: 2295 })
+  });
+  assert.equal(productPatch.status, 200);
+  const patchedProduct = (await productPatch.json()).item;
+  assert.equal(patchedProduct.name, "Cable USB actualizado");
+  assert.equal(patchedProduct.salePriceMinor, 2295);
+  assert.equal(patchedProduct.stock, 3);
+
+  const blockedStoreDelete = await fetch(`${baseUrl}/api/v1/stores/${store.syncId}`, { method: "DELETE", headers });
+  assert.equal(blockedStoreDelete.status, 409);
+  const blockedCatalogDelete = await fetch(`${baseUrl}/api/v1/catalog/${category.syncId}`, { method: "DELETE", headers });
+  assert.equal(blockedCatalogDelete.status, 409);
+  const blockedProductDelete = await fetch(`${baseUrl}/api/v1/products/${product.syncId}`, { method: "DELETE", headers });
+  assert.equal(blockedProductDelete.status, 409);
+
+  const clearStock = await fetch(`${baseUrl}/api/v1/sync/operations`, {
+    method: "POST", headers,
+    body: JSON.stringify({ operations: [{
+      operationId: "f9d1b2e5-6a7c-4d04-8e3f-5a6b7c8d9e04",
+      type: "stock.adjust",
+      payload: { storeSyncId: store.syncId, productSyncId: product.syncId, delta: -3, reason: "Cierre de inventario para prueba" }
+    }] })
+  });
+  assert.equal((await clearStock.json()).items[0].stock, 0);
+
+  const deleteProduct = await fetch(`${baseUrl}/api/v1/products/${product.syncId}`, { method: "DELETE", headers });
+  assert.equal(deleteProduct.status, 200);
+  const deleteCategory = await fetch(`${baseUrl}/api/v1/catalog/${category.syncId}`, { method: "DELETE", headers });
+  assert.equal(deleteCategory.status, 200);
+  const deleteStore = await fetch(`${baseUrl}/api/v1/stores/${store.syncId}`, { method: "DELETE", headers });
+  assert.equal(deleteStore.status, 200);
+
+  const deletedProductGet = await fetch(`${baseUrl}/api/v1/products?storeSyncId=${store.syncId}`, { headers });
+  assert.equal((await deletedProductGet.json()).items.length, 0);
+  const deletedStoreGet = await fetch(`${baseUrl}/api/v1/stores`, { headers });
+  assert.equal((await deletedStoreGet.json()).items.length, 0);
+  const deletedCategoryGet = await fetch(`${baseUrl}/api/v1/catalog`, { headers });
+  assert.equal((await deletedCategoryGet.json()).items.length, 0);
+
+  const deleteChangesResponse = await fetch(`${baseUrl}/api/v1/sync/changes?cursor=${finalBootstrap.cursor}&limit=50`, { headers });
+  const deleteChanges = await deleteChangesResponse.json();
+  assert.ok(deleteChanges.items.some((item) => item.entityType === "product" && item.operation === "delete"));
+  assert.ok(deleteChanges.items.some((item) => item.entityType === "catalog" && item.operation === "delete"));
+  assert.ok(deleteChanges.items.some((item) => item.entityType === "store" && item.operation === "delete"));
 });
