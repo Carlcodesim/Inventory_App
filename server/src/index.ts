@@ -115,6 +115,173 @@ app.post("/api/v1/pairing/exchange", limitPairingAttempts, (request, response) =
   response.json({ deviceId: normalizedDeviceId, accessToken: token, tokenType: "Bearer" });
 });
 
+
+type AuthenticatedRequest = express.Request & { deviceId?: string };
+
+function requireDevice(request: AuthenticatedRequest, response: express.Response, next: express.NextFunction) {
+  const authorization = request.header("authorization") ?? "";
+  const match = /^Bearer ([A-Za-z0-9_-]{40,})$/.exec(authorization);
+  if (!match) {
+    response.status(401).json({ error: "unauthorized", message: "Se requiere un token de dispositivo válido." });
+    return;
+  }
+
+  const tokenHash = createHash("sha256").update(match[1]).digest("hex");
+  const device = db.prepare(
+    "SELECT device_id FROM devices WHERE token_hash = ? AND revoked_at IS NULL"
+  ).get(tokenHash) as { device_id: string } | undefined;
+
+  if (!device) {
+    response.status(401).json({ error: "invalid_token", message: "El token no es válido o fue revocado." });
+    return;
+  }
+
+  request.deviceId = device.device_id;
+  db.prepare("UPDATE devices SET last_seen_at = ? WHERE device_id = ?").run(Date.now(), device.device_id);
+  next();
+}
+
+function isText(value: unknown, maxLength: number, minLength = 0): value is string {
+  return typeof value === "string" && value.trim().length >= minLength && value.trim().length <= maxLength;
+}
+
+function isNonNegativeInteger(value: unknown): value is number {
+  return Number.isSafeInteger(value) && Number(value) >= 0;
+}
+
+function logChange(entityType: string, syncId: string, operation: "upsert" | "delete", payload: unknown) {
+  db.prepare(`
+    INSERT INTO change_log (entity_type, entity_sync_id, operation, payload_json, created_at)
+    VALUES (?, ?, ?, ?, ?)
+  `).run(entityType, syncId, operation, JSON.stringify(payload), Date.now());
+}
+
+app.use("/api/v1", requireDevice);
+
+app.get("/api/v1/stores", (_request, response) => {
+  const rows = db.prepare(
+    "SELECT sync_id AS syncId, name, logo_url AS logoUrl, address, phone, color_hex AS colorHex, version, created_at AS createdAt, updated_at AS updatedAt FROM stores WHERE deleted_at IS NULL ORDER BY name"
+  ).all();
+  response.json({ items: rows });
+});
+
+app.post("/api/v1/stores", (request, response) => {
+  const { name, logoUrl = "", address = "", phone = "", colorHex = "#0284C7" } = request.body ?? {};
+  if (!isText(name, 120, 1) || !isText(logoUrl, 2048) || !isText(address, 240)
+    || !isText(phone, 40) || !isText(colorHex, 16)) {
+    response.status(400).json({ error: "invalid_store", message: "Revisa los campos de la sucursal." });
+    return;
+  }
+
+  const now = Date.now();
+  const syncId = randomBytes(16).toString("hex");
+  db.prepare(`
+    INSERT INTO stores (sync_id, name, logo_url, address, phone, color_hex, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(syncId, name.trim(), logoUrl.trim(), address.trim(), phone.trim(), colorHex.trim(), now, now);
+
+  const item = db.prepare(
+    "SELECT sync_id AS syncId, name, logo_url AS logoUrl, address, phone, color_hex AS colorHex, version, created_at AS createdAt, updated_at AS updatedAt FROM stores WHERE sync_id = ?"
+  ).get(syncId);
+  logChange("store", syncId, "upsert", item);
+  response.status(201).json({ item });
+});
+
+app.get("/api/v1/catalog", (request, response) => {
+  const type = request.query.type;
+  if (type !== undefined && type !== "CATEGORY" && type !== "SUPPLIER") {
+    response.status(400).json({ error: "invalid_type", message: "El tipo debe ser CATEGORY o SUPPLIER." });
+    return;
+  }
+  const rows = type
+    ? db.prepare("SELECT sync_id AS syncId, name, type, version, created_at AS createdAt, updated_at AS updatedAt FROM catalog_items WHERE deleted_at IS NULL AND type = ? ORDER BY name").all(type)
+    : db.prepare("SELECT sync_id AS syncId, name, type, version, created_at AS createdAt, updated_at AS updatedAt FROM catalog_items WHERE deleted_at IS NULL ORDER BY type, name").all();
+  response.json({ items: rows });
+});
+
+app.post("/api/v1/catalog", (request, response) => {
+  const { name, type } = request.body ?? {};
+  if (!isText(name, 100, 1) || (type !== "CATEGORY" && type !== "SUPPLIER")) {
+    response.status(400).json({ error: "invalid_catalog_item", message: "Nombre o tipo de catálogo inválido." });
+    return;
+  }
+
+  const normalizedName = name.trim();
+  const existing = db.prepare(
+    "SELECT sync_id FROM catalog_items WHERE type = ? AND name = ?"
+  ).get(type, normalizedName) as { sync_id: string } | undefined;
+  const now = Date.now();
+  const syncId = existing?.sync_id ?? randomBytes(16).toString("hex");
+
+  db.prepare(`
+    INSERT INTO catalog_items (sync_id, name, type, created_at, updated_at, version, deleted_at)
+    VALUES (?, ?, ?, ?, ?, 1, NULL)
+    ON CONFLICT(type, name) DO UPDATE SET
+      updated_at = excluded.updated_at,
+      version = catalog_items.version + 1,
+      deleted_at = NULL
+  `).run(syncId, normalizedName, type, now, now);
+
+  const item = db.prepare(
+    "SELECT sync_id AS syncId, name, type, version, created_at AS createdAt, updated_at AS updatedAt FROM catalog_items WHERE sync_id = ?"
+  ).get(syncId);
+  logChange("catalog", syncId, "upsert", item);
+  response.status(existing ? 200 : 201).json({ item });
+});
+
+app.get("/api/v1/products", (request, response) => {
+  const storeSyncId = request.query.storeSyncId;
+  const rows = storeSyncId
+    ? db.prepare(`SELECT sync_id AS syncId, store_sync_id AS storeSyncId, name, category, supplier,
+        cost_price_minor AS costPriceMinor, sale_price_minor AS salePriceMinor, stock,
+        min_stock_alert AS minStockAlert, photo_url AS photoUrl, sale_link AS saleLink,
+        version, created_at AS createdAt, updated_at AS updatedAt
+      FROM products WHERE deleted_at IS NULL AND store_sync_id = ? ORDER BY name`).all(String(storeSyncId))
+    : db.prepare(`SELECT sync_id AS syncId, store_sync_id AS storeSyncId, name, category, supplier,
+        cost_price_minor AS costPriceMinor, sale_price_minor AS salePriceMinor, stock,
+        min_stock_alert AS minStockAlert, photo_url AS photoUrl, sale_link AS saleLink,
+        version, created_at AS createdAt, updated_at AS updatedAt
+      FROM products WHERE deleted_at IS NULL ORDER BY name`).all();
+  response.json({ items: rows });
+});
+
+app.post("/api/v1/products", (request, response) => {
+  const body = request.body ?? {};
+  const { storeSyncId, name, category, supplier = "", costPriceMinor, salePriceMinor,
+    stock = 0, minStockAlert = 5, photoUrl = "", saleLink = "" } = body;
+
+  if (!isText(storeSyncId, 64, 1) || !isText(name, 160, 1) || !isText(category, 100, 1)
+    || !isText(supplier, 100) || !isNonNegativeInteger(costPriceMinor)
+    || !isNonNegativeInteger(salePriceMinor) || !isNonNegativeInteger(stock)
+    || !isNonNegativeInteger(minStockAlert) || !isText(photoUrl, 2048) || !isText(saleLink, 2048)) {
+    response.status(400).json({ error: "invalid_product", message: "Revisa los datos del producto. Los importes deben enviarse en centavos enteros." });
+    return;
+  }
+
+  const store = db.prepare("SELECT sync_id FROM stores WHERE sync_id = ? AND deleted_at IS NULL").get(storeSyncId);
+  if (!store) {
+    response.status(404).json({ error: "store_not_found", message: "La sucursal indicada no existe." });
+    return;
+  }
+
+  const now = Date.now();
+  const syncId = randomBytes(16).toString("hex");
+  db.prepare(`
+    INSERT INTO products (
+      sync_id, store_sync_id, name, category, supplier, cost_price_minor, sale_price_minor,
+      stock, min_stock_alert, photo_url, sale_link, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(syncId, storeSyncId, name.trim(), category.trim(), supplier.trim(), costPriceMinor,
+    salePriceMinor, stock, minStockAlert, photoUrl.trim(), saleLink.trim(), now, now);
+
+  const item = db.prepare(`SELECT sync_id AS syncId, store_sync_id AS storeSyncId, name, category,
+    supplier, cost_price_minor AS costPriceMinor, sale_price_minor AS salePriceMinor, stock,
+    min_stock_alert AS minStockAlert, photo_url AS photoUrl, sale_link AS saleLink,
+    version, created_at AS createdAt, updated_at AS updatedAt FROM products WHERE sync_id = ?`).get(syncId);
+  logChange("product", syncId, "upsert", item);
+  response.status(201).json({ item });
+});
+
 app.listen(port, host, () => {
   console.log(`Inventory_App API listening on http://localhost:${port}`);
   console.log("LAN access is enabled; use only on a trusted private network.");
