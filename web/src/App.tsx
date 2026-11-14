@@ -76,7 +76,7 @@ export default function App() {
   function openEditor(next:Editor, values:Draft = {}) { setError(""); setNotice(""); setEditor(next); setDraft(values); }
   function editStore(s:Store) { openEditor({kind:"store",id:s.syncId},{name:s.name,logoUrl:blank(s.logoUrl),address:blank(s.address),phone:blank(s.phone),colorHex:s.colorHex || "#0284C7"}); }
   function editCatalog(c:CatalogItem) { openEditor({kind:c.type==="CATEGORY"?"category":"supplier",id:c.syncId},{name:c.name}); }
-  function editProduct(p:Product) { openEditor({kind:"product",id:p.syncId},{name:p.name,category:p.category,supplier:p.supplier,costPrice:blank(p.costPriceMinor/100),salePrice:blank(p.salePriceMinor/100),minStockAlert:blank(p.minStockAlert),photoUrl:blank(p.photoUrl),saleLink:blank(p.saleLink)}); }
+  function editProduct(p:Product) { openEditor({kind:"product",id:p.syncId},{storeSyncId:p.storeSyncId,name:p.name,category:p.category,supplier:p.supplier,costPrice:blank(p.costPriceMinor/100),salePrice:blank(p.salePriceMinor/100),minStockAlert:blank(p.minStockAlert),photoUrl:blank(p.photoUrl),saleLink:blank(p.saleLink)}); }
   function newProduct() { openEditor({kind:"product"},{storeSyncId:stores[0]?.syncId ?? "",name:"",category:catalog.find(c=>c.type==="CATEGORY")?.name ?? "",supplier:"",costPrice:"0",salePrice:"0",stock:"0",minStockAlert:"5",photoUrl:"",saleLink:""}); }
   function newStore() { openEditor({kind:"store"},{name:"",address:"",phone:"",logoUrl:"",colorHex:"#0284C7"}); }
   function newCatalog(kind:"category"|"supplier") { openEditor({kind},{name:""}); }
