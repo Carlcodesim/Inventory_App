@@ -314,6 +314,181 @@ app.post("/api/v1/products", (request, response) => {
   response.status(201).json({ item });
 });
 
+
+type InventoryOperation = {
+  operationId: string;
+  type: "sale.create" | "stock.adjust";
+  payload: Record<string, unknown>;
+};
+
+class OperationError extends Error {
+  constructor(public status: number, public code: string, message: string) {
+    super(message);
+  }
+}
+
+function isUuid(value: unknown): value is string {
+  return typeof value === "string"
+    && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+function processInventoryOperation(deviceId: string, operation: InventoryOperation) {
+  const execute = db.transaction(() => {
+    const prior = db.prepare(
+      "SELECT device_id AS deviceId, response_json AS responseJson FROM operation_receipts WHERE operation_id = ?"
+    ).get(operation.operationId) as { deviceId: string; responseJson: string } | undefined;
+
+    if (prior) {
+      if (prior.deviceId !== deviceId) {
+        throw new OperationError(409, "operation_id_conflict", "Este operationId ya pertenece a otro dispositivo.");
+      }
+      return { ...(JSON.parse(prior.responseJson) as Record<string, unknown>), replayed: true };
+    }
+
+    const payload = operation.payload;
+    const storeSyncId = payload.storeSyncId;
+    const productSyncId = payload.productSyncId;
+    if (!isUuid(storeSyncId) || !isUuid(productSyncId)) {
+      throw new OperationError(400, "invalid_operation_payload", "La sucursal o el producto no tienen un syncId válido.");
+    }
+
+    const product = db.prepare(`
+      SELECT p.sync_id AS syncId, p.store_sync_id AS storeSyncId, p.name,
+        p.cost_price_minor AS costPriceMinor, p.sale_price_minor AS salePriceMinor,
+        p.stock, p.version, s.name AS storeName
+      FROM products p JOIN stores s ON s.sync_id = p.store_sync_id
+      WHERE p.sync_id = ? AND p.store_sync_id = ? AND p.deleted_at IS NULL AND s.deleted_at IS NULL
+    `).get(productSyncId, storeSyncId) as {
+      syncId: string; storeSyncId: string; name: string; costPriceMinor: number;
+      salePriceMinor: number; stock: number; version: number; storeName: string;
+    } | undefined;
+
+    if (!product) throw new OperationError(404, "product_not_found", "El producto no existe en la sucursal indicada.");
+
+    const now = Date.now();
+    let result: Record<string, unknown>;
+
+    if (operation.type === "sale.create") {
+      const quantity = payload.quantity;
+      const customerNote = payload.customerNote ?? "";
+      if (!Number.isSafeInteger(quantity) || Number(quantity) <= 0
+        || !isText(customerNote, 240)) {
+        throw new OperationError(400, "invalid_sale", "La cantidad debe ser positiva y la nota no puede superar 240 caracteres.");
+      }
+      const qty = Number(quantity);
+      if (product.stock < qty) {
+        throw new OperationError(409, "insufficient_stock", "No hay existencia suficiente para completar la venta.");
+      }
+
+      const totalAmountMinor = product.salePriceMinor * qty;
+      const netProfitMinor = (product.salePriceMinor - product.costPriceMinor) * qty;
+      if (!Number.isSafeInteger(totalAmountMinor) || !Number.isSafeInteger(netProfitMinor)) {
+        throw new OperationError(400, "amount_overflow", "El importe de la operación supera el límite permitido.");
+      }
+
+      const newStock = product.stock - qty;
+      const saleSyncId = randomUUID();
+      const movementSyncId = randomUUID();
+      db.prepare(`
+        INSERT INTO sales (sync_id, operation_id, store_sync_id, product_sync_id, product_name,
+          quantity, unit_cost_minor, unit_price_minor, total_amount_minor, net_profit_minor, customer_note, timestamp)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(saleSyncId, operation.operationId, storeSyncId, productSyncId, product.name,
+        qty, product.costPriceMinor, product.salePriceMinor, totalAmountMinor, netProfitMinor,
+        String(customerNote).trim(), now);
+
+      db.prepare("UPDATE products SET stock = ?, updated_at = ?, version = version + 1 WHERE sync_id = ?")
+        .run(newStock, now, productSyncId);
+      db.prepare(`
+        INSERT INTO stock_movements (sync_id, operation_id, store_sync_id, store_name, product_sync_id,
+          product_name, movement_type, quantity, previous_stock, new_stock, reason, timestamp)
+        VALUES (?, ?, ?, ?, ?, ?, 'VENTA', ?, ?, ?, ?, ?)
+      `).run(movementSyncId, operation.operationId, storeSyncId, product.storeName,
+        productSyncId, product.name, qty, product.stock, newStock, "Venta", now);
+
+      const updatedProduct = db.prepare(`
+        SELECT sync_id AS syncId, store_sync_id AS storeSyncId, name, category, supplier,
+          cost_price_minor AS costPriceMinor, sale_price_minor AS salePriceMinor, stock,
+          min_stock_alert AS minStockAlert, photo_url AS photoUrl, sale_link AS saleLink,
+          version, created_at AS createdAt, updated_at AS updatedAt
+        FROM products WHERE sync_id = ?
+      `).get(productSyncId);
+      logChange("product", productSyncId, "upsert", updatedProduct);
+      result = { operationId: operation.operationId, type: operation.type, status: "applied",
+        saleSyncId, movementSyncId, totalAmountMinor, netProfitMinor, stock: newStock };
+    } else {
+      const delta = payload.delta;
+      const reason = payload.reason ?? "Ajuste manual";
+      if (!Number.isSafeInteger(delta) || Number(delta) === 0 || !isText(reason, 240, 1)) {
+        throw new OperationError(400, "invalid_stock_adjustment", "El ajuste debe ser un entero distinto de cero e incluir un motivo.");
+      }
+      const change = Number(delta);
+      const newStock = product.stock + change;
+      if (!Number.isSafeInteger(newStock) || newStock < 0) {
+        throw new OperationError(409, "insufficient_stock", "El ajuste no puede dejar el inventario en negativo.");
+      }
+      const movementSyncId = randomUUID();
+      db.prepare("UPDATE products SET stock = ?, updated_at = ?, version = version + 1 WHERE sync_id = ?")
+        .run(newStock, now, productSyncId);
+      db.prepare(`
+        INSERT INTO stock_movements (sync_id, operation_id, store_sync_id, store_name, product_sync_id,
+          product_name, movement_type, quantity, previous_stock, new_stock, reason, timestamp)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(movementSyncId, operation.operationId, storeSyncId, product.storeName, productSyncId,
+        product.name, change > 0 ? "AJUSTE_POSITIVO" : "AJUSTE_NEGATIVO", Math.abs(change),
+        product.stock, newStock, String(reason).trim(), now);
+
+      const updatedProduct = db.prepare(`
+        SELECT sync_id AS syncId, store_sync_id AS storeSyncId, name, category, supplier,
+          cost_price_minor AS costPriceMinor, sale_price_minor AS salePriceMinor, stock,
+          min_stock_alert AS minStockAlert, photo_url AS photoUrl, sale_link AS saleLink,
+          version, created_at AS createdAt, updated_at AS updatedAt
+        FROM products WHERE sync_id = ?
+      `).get(productSyncId);
+      logChange("product", productSyncId, "upsert", updatedProduct);
+      result = { operationId: operation.operationId, type: operation.type, status: "applied",
+        movementSyncId, previousStock: product.stock, stock: newStock };
+    }
+
+    db.prepare("INSERT INTO operation_receipts (operation_id, device_id, response_json, created_at) VALUES (?, ?, ?, ?)")
+      .run(operation.operationId, deviceId, JSON.stringify(result), now);
+    return result;
+  });
+
+  return execute();
+}
+
+app.post("/api/v1/sync/operations", (request: AuthenticatedRequest, response) => {
+  const operations = request.body?.operations;
+  if (!Array.isArray(operations) || operations.length < 1 || operations.length > 100) {
+    response.status(400).json({ error: "invalid_operations", message: "Envía entre 1 y 100 operaciones por solicitud." });
+    return;
+  }
+
+  const results = operations.map((candidate: unknown) => {
+    if (!candidate || typeof candidate !== "object") {
+      return { status: "rejected", error: "invalid_operation", message: "La operación debe ser un objeto." };
+    }
+    const operation = candidate as Record<string, unknown>;
+    if (!isUuid(operation.operationId)
+      || (operation.type !== "sale.create" && operation.type !== "stock.adjust")
+      || !operation.payload || typeof operation.payload !== "object" || Array.isArray(operation.payload)) {
+      return { operationId: operation.operationId, status: "rejected", error: "invalid_operation", message: "Tipo, operationId o payload inválido." };
+    }
+
+    try {
+      return processInventoryOperation(request.deviceId!, operation as InventoryOperation);
+    } catch (error) {
+      if (error instanceof OperationError) {
+        return { operationId: operation.operationId, status: "rejected", error: error.code, message: error.message, httpStatus: error.status };
+      }
+      throw error;
+    }
+  });
+
+  response.status(200).json({ items: results });
+});
+
 app.listen(port, host, () => {
   console.log(`Inventory_App API listening on http://localhost:${port}`);
   console.log("LAN access is enabled; use only on a trusted private network.");
