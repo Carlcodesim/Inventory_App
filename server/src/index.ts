@@ -468,6 +468,10 @@ app.patch("/api/v1/products/:syncId", (request, response) => {
     return;
   }
   const body = request.body ?? {};
+  if (Object.hasOwn(body, "stock") || Object.hasOwn(body, "storeSyncId")) {
+    response.status(400).json({ error: "immutable_product_fields", message: "El stock solo se modifica mediante operaciones de inventario y la sucursal no puede cambiarse en esta operación." });
+    return;
+  }
   const fields = [
     ["name", "name", 160, true],
     ["category", "category", 100, true],
