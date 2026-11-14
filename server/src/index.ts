@@ -417,9 +417,19 @@ app.patch("/api/v1/catalog/:syncId", (request, response) => {
     return;
   }
   const now = Date.now();
-  db.prepare("UPDATE catalog_items SET name = ?, updated_at = ?, version = version + 1 WHERE sync_id = ? AND deleted_at IS NULL").run(normalizedName, now, syncId);
-  const item = getCatalogItem(syncId);
-  logChange("catalog", syncId, "upsert", item);
+  const column = current.type === "CATEGORY" ? "category" : "supplier";
+  const updateCatalog = db.transaction(() => {
+    db.prepare("UPDATE catalog_items SET name = ?, updated_at = ?, version = version + 1 WHERE sync_id = ? AND deleted_at IS NULL").run(normalizedName, now, syncId);
+    db.prepare("UPDATE products SET " + column + " = ?, updated_at = ?, version = version + 1 WHERE " + column + " = ? AND deleted_at IS NULL").run(normalizedName, now, current.name);
+    const affected = db.prepare("SELECT sync_id AS syncId FROM products WHERE " + column + " = ? AND deleted_at IS NULL").all(normalizedName) as Array<{ syncId: string }>;
+    for (const product of affected) {
+      logChange("product", product.syncId, "upsert", getProduct(product.syncId));
+    }
+    const item = getCatalogItem(syncId);
+    logChange("catalog", syncId, "upsert", item);
+    return item;
+  });
+  const item = updateCatalog();
   response.json({ item });
 });
 
