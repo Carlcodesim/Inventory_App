@@ -683,6 +683,24 @@ function processInventoryOperation(deviceId: string, operation: InventoryOperati
   return execute();
 }
 
+app.get("/api/v1/sales", (request, response) => {
+  const rawLimit = request.query.limit === undefined ? 100 : Number(request.query.limit);
+  if (!Number.isInteger(rawLimit) || rawLimit < 1 || rawLimit > 200) {
+    response.status(400).json({ error: "invalid_limit", message: "El límite debe ser un entero entre 1 y 200." });
+    return;
+  }
+  const items = db.prepare(`
+    SELECT sync_id AS syncId, store_sync_id AS storeSyncId, product_sync_id AS productSyncId,
+      product_name AS productName, quantity, unit_price_minor AS unitPriceMinor,
+      total_amount_minor AS totalAmountMinor, net_profit_minor AS netProfitMinor,
+      customer_note AS customerNote, timestamp
+    FROM sales
+    ORDER BY timestamp DESC, id DESC
+    LIMIT ?
+  `).all(rawLimit);
+  response.json({ items });
+});
+
 app.post("/api/v1/sync/operations", (request: AuthenticatedRequest, response) => {
   const operations = request.body?.operations;
   if (!Array.isArray(operations) || operations.length < 1 || operations.length > 100) {
