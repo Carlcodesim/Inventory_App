@@ -61,7 +61,7 @@ export default function App() {
       setError(message);
       if (message.includes("token") || message.includes("dispositivo")) logout();
     } finally { setLoading(false); }
-  }, [api, token]);
+  }, [api, token, saleStoreId]);
 
   function logout() {
     sessionStorage.removeItem(TOKEN_KEY); setToken(""); setStores([]); setCatalog([]); setProducts([]); setSales([]);
