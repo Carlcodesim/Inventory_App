@@ -154,6 +154,19 @@ paths:
         "200": { description: Producto marcado como eliminado }
         "404": { description: Producto inexistente o eliminado }
         "409": { description: El producto todavía tiene existencias }
+  /sales:
+    get:
+      summary: Consultar historial reciente de ventas
+      parameters:
+        - in: query
+          name: limit
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 200, default: 100 }
+      responses:
+        "200":
+          description: Ventas recientes ordenadas de más nueva a más antigua
+        "400":
+          description: Límite inválido
   /sync/changes:
     get:
       summary: Descargar cambios posteriores al cursor
