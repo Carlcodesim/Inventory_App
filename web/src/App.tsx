@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 type Store = { syncId: string; name: string; logoUrl?: string; address?: string; phone?: string; colorHex?: string };
+type Sale = { syncId: string; storeSyncId: string; productSyncId: string; productName: string; quantity: number; unitPriceMinor: number; totalAmountMinor: number; netProfitMinor: number; customerNote: string; timestamp: number };
 type CatalogItem = { syncId: string; name: string; type: "CATEGORY" | "SUPPLIER" };
 type Product = { syncId: string; storeSyncId: string; name: string; category: string; supplier: string; costPriceMinor: number; salePriceMinor: number; stock: number; minStockAlert: number; photoUrl?: string; saleLink?: string };
-type Tab = "overview" | "stores" | "products" | "catalog";
+type Tab = "overview" | "stores" | "products" | "catalog" | "sales";
 type Editor = { kind: "store" | "category" | "supplier" | "product" | "adjust"; id?: string };
 type Draft = Record<string, string>;
 const TOKEN_KEY = "inventory_web_access_token";
@@ -25,6 +26,12 @@ export default function App() {
   const [stores, setStores] = useState<Store[]>([]);
   const [catalog, setCatalog] = useState<CatalogItem[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
+  const [sales, setSales] = useState<Sale[]>([]);
+  const [saleStoreId, setSaleStoreId] = useState("");
+  const [saleProductId, setSaleProductId] = useState("");
+  const [saleQuantity, setSaleQuantity] = useState("1");
+  const [saleNote, setSaleNote] = useState("");
+  const [saleSaving, setSaleSaving] = useState(false);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -44,10 +51,11 @@ export default function App() {
     if (!token) return;
     setLoading(true); setError("");
     try {
-      const [s, c, p] = await Promise.all([
-        api<{items:Store[]}>("/api/v1/stores"), api<{items:CatalogItem[]}>("/api/v1/catalog"), api<{items:Product[]}>("/api/v1/products")
+      const [s, c, p, h] = await Promise.all([
+        api<{items:Store[]}>("/api/v1/stores"), api<{items:CatalogItem[]}>("/api/v1/catalog"), api<{items:Product[]}>("/api/v1/products"), api<{items:Sale[]}>("/api/v1/sales?limit=100")
       ]);
-      setStores(s.items); setCatalog(c.items); setProducts(p.items); setLastUpdated(new Date().toLocaleTimeString("es-DO"));
+      setStores(s.items); setCatalog(c.items); setProducts(p.items); setSales(h.items);
+      if (!saleStoreId && s.items.length) setSaleStoreId(s.items[0].syncId); setLastUpdated(new Date().toLocaleTimeString("es-DO"));
     } catch (e) {
       const message = e instanceof Error ? e.message : "No se pudieron cargar los datos.";
       setError(message);
@@ -56,7 +64,7 @@ export default function App() {
   }, [api, token]);
 
   function logout() {
-    sessionStorage.removeItem(TOKEN_KEY); setToken(""); setStores([]); setCatalog([]); setProducts([]);
+    sessionStorage.removeItem(TOKEN_KEY); setToken(""); setStores([]); setCatalog([]); setProducts([]); setSales([]);
   }
   async function connect(event: React.FormEvent) {
     event.preventDefault(); setPairing(true); setError("");
@@ -71,7 +79,7 @@ export default function App() {
 
   const lowStock = useMemo(() => products.filter(p => p.stock <= p.minStockAlert),[products]);
   const inventoryValue = useMemo(() => products.reduce((sum,p) => sum+p.costPriceMinor*p.stock,0),[products]);
-  const pageTitle:Record<Tab,string> = {overview:"Resumen general",stores:"Sucursales",products:"Productos",catalog:"Categorías y proveedores"};
+  const pageTitle:Record<Tab,string> = {overview:"Resumen general",stores:"Sucursales",products:"Productos",catalog:"Categorías y proveedores",sales:"Ventas"};
 
   function openEditor(next:Editor, values:Draft = {}) { setError(""); setNotice(""); setEditor(next); setDraft(values); }
   function editStore(s:Store) { openEditor({kind:"store",id:s.syncId},{name:s.name,logoUrl:blank(s.logoUrl),address:blank(s.address),phone:blank(s.phone),colorHex:s.colorHex || "#0284C7"}); }
@@ -118,10 +126,39 @@ export default function App() {
 
   async function submitAdjustment(event:React.FormEvent) { await saveEditor(event); }
 
+  const saleProducts = products.filter(p => p.storeSyncId === saleStoreId);
+  const selectedSaleProduct = saleProducts.find(p => p.syncId === saleProductId);
+  const saleQty = Number(saleQuantity);
+  const saleTotalMinor = selectedSaleProduct && Number.isSafeInteger(saleQty) && saleQty > 0
+    ? selectedSaleProduct.salePriceMinor * saleQty : 0;
+
+  async function registerSale(event:React.FormEvent) {
+    event.preventDefault();
+    if (!selectedSaleProduct) { setError("Selecciona un producto para vender."); return; }
+    if (!Number.isSafeInteger(saleQty) || saleQty <= 0) { setError("La cantidad debe ser un número entero mayor que cero."); return; }
+    if (saleQty > selectedSaleProduct.stock) { setError("No hay existencia suficiente para completar esta venta."); return; }
+    setSaleSaving(true); setError(""); setNotice("");
+    try {
+      const result = await api<{items:Array<{status:string;message?:string;totalAmountMinor?:number;stock?:number}>}>(
+        "/api/v1/sync/operations",
+        { method:"POST", body:JSON.stringify({operations:[{
+          operationId:createDeviceId(), type:"sale.create",
+          payload:{storeSyncId:saleStoreId,productSyncId:selectedSaleProduct.syncId,quantity:saleQty,customerNote:saleNote.trim()}
+        }]}) }
+      );
+      const operation = result.items?.[0];
+      if (!operation || operation.status !== "applied") throw new Error(operation?.message || "El servidor no pudo registrar la venta.");
+      setNotice("Venta registrada. Total: " + money(operation.totalAmountMinor ?? saleTotalMinor) + ". Existencia restante: " + (operation.stock ?? selectedSaleProduct.stock-saleQty) + ".");
+      setSaleQuantity("1"); setSaleNote(""); setSaleProductId("");
+      await loadData();
+    } catch(e) { setError(e instanceof Error ? e.message : "No se pudo registrar la venta."); }
+    finally { setSaleSaving(false); }
+  }
+
   if(!token) return <main className="login-shell"><section className="login-card"><div className="brand-mark">I</div><p className="eyebrow">INVENTORY_APP · PANEL WEB</p><h1>Tu inventario,<br/>bajo control.</h1><p className="muted">Conecta este panel con el servidor de tu PC usando un código de emparejamiento de un solo uso.</p><form onSubmit={connect}><label htmlFor="pairing">Código de emparejamiento</label><input id="pairing" value={pairingCode} onChange={e=>setPairingCode(e.target.value)} placeholder="Pega aquí tu código" maxLength={20} required autoComplete="off"/><button className="primary full" disabled={pairing||pairingCode.trim().length!==20}>{pairing?"Conectando…":"Conectar panel"}</button></form>{error&&<p className="error">{error}</p>}<p className="hint">El código vence a los 5 minutos y solo puede utilizarse una vez. El token se conserva únicamente durante esta sesión del navegador.</p></section></main>;
 
   return <div className="app-shell">
-    <aside className="sidebar"><div className="brand"><div className="brand-mark small">I</div><div><strong>INSERC</strong><span>INVENTORY_APP</span></div></div><div className="side-label">MENÚ PRINCIPAL</div><nav>{([["overview","▦","Resumen"],["stores","⌂","Sucursales"],["products","▤","Productos"],["catalog","◇","Catálogo"]] as [Tab,string,string][]).map(([key,icon,label])=><button key={key} className={tab===key?"nav-item active":"nav-item"} onClick={()=>setTab(key)}><span>{icon}</span>{label}</button>)}</nav><div className="sidebar-bottom"><span className="online-dot"/> Servidor conectado <button className="logout" onClick={logout}>Cerrar sesión</button></div></aside>
+    <aside className="sidebar"><div className="brand"><div className="brand-mark small">I</div><div><strong>INSERC</strong><span>INVENTORY_APP</span></div></div><div className="side-label">MENÚ PRINCIPAL</div><nav>{([["overview","▦","Resumen"],["stores","⌂","Sucursales"],["products","▤","Productos"],["catalog","◇","Catálogo"],["sales","＄","Ventas"]] as [Tab,string,string][]).map(([key,icon,label])=><button key={key} className={tab===key?"nav-item active":"nav-item"} onClick={()=>setTab(key)}><span>{icon}</span>{label}</button>)}</nav><div className="sidebar-bottom"><span className="online-dot"/> Servidor conectado <button className="logout" onClick={logout}>Cerrar sesión</button></div></aside>
     <main className="main-content">
       <header className="topbar"><div><p className="eyebrow">PANEL DE ADMINISTRACIÓN</p><h1>{pageTitle[tab]}</h1></div><div className="top-actions"><span className="server-pill"><i/> En línea</span><button className="refresh" onClick={()=>void loadData()} disabled={loading}>↻ Actualizar</button></div></header>
       {error&&<div className="alert">{error}</div>}{notice&&<div className="success-alert">{notice}</div>}{loading&&<div className="loading-line">Actualizando información…</div>}
@@ -129,6 +166,26 @@ export default function App() {
       {tab==="stores"&&<section className="panel"><div className="panel-heading"><div><h3>Todas las sucursales</h3><p>{stores.length} sucursal(es) activas</p></div><button className="primary compact" onClick={newStore}>＋ Nueva sucursal</button></div>{stores.length?<div className="table-wrap"><table><thead><tr><th>Nombre</th><th>Dirección</th><th>Teléfono</th><th>Acciones</th></tr></thead><tbody>{stores.map(s=><tr key={s.syncId}><td><strong>{s.name}</strong></td><td>{s.address||"—"}</td><td>{s.phone||"—"}</td><td><div className="row-actions"><button onClick={()=>editStore(s)}>Editar</button><button className="danger-text" onClick={()=>void removeItem("store",s.syncId,s.name)}>Eliminar</button></div></td></tr>)}</tbody></table></div>:<div className="empty-state">No hay sucursales registradas.</div>}</section>}
       {tab==="products"&&<section className="panel"><div className="panel-heading"><div><h3>Inventario de productos</h3><p>{products.length} producto(s) activos</p></div><button className="primary compact" onClick={newProduct} disabled={!stores.length}>＋ Nuevo producto</button></div>{products.length?<div className="table-wrap"><table><thead><tr><th>Producto</th><th>Categoría</th><th>Existencia</th><th>Precio venta</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>{products.map(p=><tr key={p.syncId}><td><strong>{p.name}</strong><small className="cell-sub">{stores.find(s=>s.syncId===p.storeSyncId)?.name||"Sucursal"}</small></td><td>{p.category}</td><td>{p.stock}</td><td>{money(p.salePriceMinor)}</td><td><span className={p.stock<=p.minStockAlert?"status warning":"status good"}>{p.stock<=p.minStockAlert?"Stock bajo":"Disponible"}</span></td><td><div className="row-actions"><button onClick={()=>editProduct(p)}>Editar</button><button onClick={()=>openEditor({kind:"adjust",id:p.syncId},{storeSyncId:p.storeSyncId,delta:"1",reason:"Ajuste desde panel web"})}>Ajustar</button><button className="danger-text" onClick={()=>void removeItem("product",p.syncId,p.name)}>Eliminar</button></div></td></tr>)}</tbody></table></div>:<div className="empty-state">No hay productos registrados.</div>}</section>}
       {tab==="catalog"&&<section className="catalog-grid">{(["category","supplier"] as const).map(kind=>{const list=catalog.filter(c=>c.type===(kind==="category"?"CATEGORY":"SUPPLIER"));return <article className="panel" key={kind}><div className="panel-heading"><div><h3>{kind==="category"?"Categorías":"Proveedores"}</h3><p>{kind==="category"?"Clasificación de productos":"Directorio de proveedores"}</p></div><button className="primary compact" onClick={()=>newCatalog(kind)}>＋ Agregar</button></div>{list.map(c=><div className="catalog-row" key={c.syncId}><span className="catalog-icon">{kind==="category"?"◇":"⌑"}</span><strong>{c.name}</strong><div className="row-actions"><button onClick={()=>editCatalog(c)}>Editar</button><button className="danger-text" onClick={()=>void removeItem("catalog",c.syncId,c.name)}>Eliminar</button></div></div>)}{!list.length&&<p className="muted">Todavía no hay elementos.</p>}</article>})}</section>}
+      {tab==="sales"&&<section className="sales-layout">
+        <article className="panel sale-form-panel">
+          <div className="panel-heading"><div><h3>Nueva venta</h3><p>Registra una venta y descuenta el inventario automáticamente</p></div><span className="sale-symbol">＄</span></div>
+          <form onSubmit={registerSale}>
+            <label className="field-label">Sucursal<select value={saleStoreId} onChange={e=>{setSaleStoreId(e.target.value);setSaleProductId("");}} required><option value="">Selecciona una sucursal</option>{stores.map(s=><option key={s.syncId} value={s.syncId}>{s.name}</option>)}</select></label>
+            <label className="field-label">Producto<select value={saleProductId} onChange={e=>setSaleProductId(e.target.value)} required><option value="">Selecciona un producto</option>{saleProducts.map(p=><option key={p.syncId} value={p.syncId} disabled={p.stock===0}>{p.name} · Stock: {p.stock} · {money(p.salePriceMinor)}</option>)}</select></label>
+            {selectedSaleProduct&&<div className="sale-product-summary"><div><span>Precio unitario</span><strong>{money(selectedSaleProduct.salePriceMinor)}</strong></div><div><span>Existencia disponible</span><strong>{selectedSaleProduct.stock} ud.</strong></div></div>}
+            <Field label="Cantidad" type="number" min="1" step="1" value={saleQuantity} onChange={setSaleQuantity} required/>
+            <Field label="Nota / referencia (opcional)" value={saleNote} onChange={setSaleNote}/>
+            <div className="sale-total"><span>Total de la venta</span><strong>{money(saleTotalMinor)}</strong></div>
+            {selectedSaleProduct&&saleQty>selectedSaleProduct.stock&&<p className="error">La cantidad supera las existencias disponibles.</p>}
+            <button className="primary full" type="submit" disabled={saleSaving||!selectedSaleProduct||!Number.isSafeInteger(saleQty)||saleQty<=0||saleQty>selectedSaleProduct.stock}>{saleSaving?"Registrando…":"Confirmar venta"}</button>
+            <p className="hint">Cada registro corresponde a un producto. La operación se guarda de forma segura y no permite stock negativo.</p>
+          </form>
+        </article>
+        <article className="panel sales-history-panel">
+          <div className="panel-heading"><div><h3>Historial de ventas</h3><p>Últimas {sales.length} ventas registradas</p></div><button className="text-button" onClick={()=>void loadData()} disabled={loading}>↻ Actualizar</button></div>
+          {sales.length===0?<div className="empty-state"><strong>Aún no hay ventas</strong><p>Las ventas que registres aparecerán aquí.</p></div>:<div className="table-wrap"><table><thead><tr><th>Fecha</th><th>Producto</th><th>Cantidad</th><th>Total</th></tr></thead><tbody>{sales.map(s=><tr key={s.syncId}><td>{new Date(s.timestamp).toLocaleString("es-DO")}</td><td><strong>{s.productName}</strong><small className="cell-sub">{stores.find(st=>st.syncId===s.storeSyncId)?.name||"Sucursal"}</small></td><td>{s.quantity}</td><td><strong>{money(s.totalAmountMinor)}</strong></td></tr>)}</tbody></table></div>}
+        </article>
+      </section>}
       <footer className="footer"><span>INSERC · Inventory_App</span><span>Última actualización: {lastUpdated||"—"}</span></footer>
     </main>
     {editor&&<div className="modal-backdrop" onMouseDown={e=>{if(e.target===e.currentTarget)setEditor(null);}}><section className="editor-modal"><div className="modal-heading"><div><p className="eyebrow">ADMINISTRACIÓN</p><h2>{editor.kind==="adjust"?"Ajustar inventario":editor.id?"Editar registro":editor.kind==="store"?"Nueva sucursal":editor.kind==="product"?"Nuevo producto":editor.kind==="category"?"Nueva categoría":"Nuevo proveedor"}</h2></div><button className="modal-close" onClick={()=>setEditor(null)}>×</button></div>
